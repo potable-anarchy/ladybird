@@ -1,131 +1,141 @@
 name: Weekly Ladybird Build
 
 on:
-  schedule:
-    # Run every Sunday at 2 AM UTC
-    - cron: '0 2 * * 0'
-  workflow_dispatch: # Allow manual triggering
+    schedule:
+        # Run every Sunday at 2 AM UTC
+        - cron: "0 2 * * 0"
+    workflow_dispatch: # Allow manual triggering
 
 jobs:
-  sync-upstream:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+    sync-upstream:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync with upstream
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/LadybirdBrowser/ladybird.git
-          git fetch upstream
-          git checkout master
-          git merge upstream/master --no-edit
-          git push origin master
+            - name: Sync with upstream
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git remote add upstream https://github.com/LadybirdBrowser/ladybird.git
+                  git fetch upstream
+                  git checkout master
+                  git merge upstream/master --no-edit
+                  git push origin master
 
-  build-macos:
-    needs: sync-upstream
-    runs-on: macos-14 # M1/M2 runner for arm64 builds
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: master
+    build-macos:
+        needs: sync-upstream
+        runs-on: macos-14 # M1/M2 runner for arm64 builds
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  ref: master
 
-      - name: Install dependencies
-        run: |
-          brew install autoconf autoconf-archive automake cmake nasm ninja ccache pkg-config
+            - name: Install dependencies
+              run: |
+                  brew install autoconf autoconf-archive automake cmake nasm ninja ccache pkg-config
 
-      - name: Build Ladybird arm64
-        run: |
-          cmake --preset Distribution -B Build/arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
-          cmake --build Build/arm64 --target Ladybird -j$(sysctl -n hw.ncpu)
+            - name: Bootstrap vcpkg
+              run: |
+                  git clone https://github.com/microsoft/vcpkg.git Build/vcpkg
+                  Build/vcpkg/bootstrap-vcpkg.sh
 
-      - name: Create DMG
-        run: |
-          mkdir -p dmg-temp
-          cp -R Build/arm64/bin/Ladybird.app dmg-temp/
-          ln -s /Applications dmg-temp/Applications
-          hdiutil create -volname "Ladybird" -srcfolder dmg-temp -ov -format UDZO Ladybird-arm64.dmg
-          rm -rf dmg-temp
+            - name: Build Ladybird arm64
+              run: |
+                  cmake --preset Distribution -B Build/arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
+                  cmake --build Build/arm64 --target Ladybird -j$(sysctl -n hw.ncpu)
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ladybird-macos-arm64
-          path: Ladybird-arm64.dmg
+            - name: Create DMG
+              run: |
+                  mkdir -p dmg-temp
+                  cp -R Build/arm64/bin/Ladybird.app dmg-temp/
+                  ln -s /Applications dmg-temp/Applications
+                  hdiutil create -volname "Ladybird" -srcfolder dmg-temp -ov -format UDZO Ladybird-arm64.dmg
+                  rm -rf dmg-temp
 
-  build-linux:
-    needs: sync-upstream
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: master
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ladybird-macos-arm64
+                  path: Ladybird-arm64.dmg
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y autoconf autoconf-archive automake build-essential ccache cmake \
-            curl fonts-liberation2 libdrm-dev libgl1-mesa-dev libtool nasm ninja-build \
-            pkg-config python3-venv qt6-base-dev qt6-tools-dev-tools qt6-wayland tar unzip zip
+    build-linux:
+        needs: sync-upstream
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  ref: master
 
-      - name: Build Ladybird x86_64
-        run: |
-          cmake --preset Distribution -B Build/linux
-          cmake --build Build/linux --target Ladybird -j$(nproc)
+            - name: Install dependencies
+              run: |
+                  sudo apt update
+                  sudo apt install -y autoconf autoconf-archive automake build-essential ccache cmake \
+                    curl fonts-liberation2 libdrm-dev libgl1-mesa-dev libtool nasm ninja-build \
+                    pkg-config python3-venv qt6-base-dev qt6-tools-dev-tools qt6-wayland tar unzip zip
 
-      - name: Create tarball
-        run: |
-          mkdir -p ladybird-linux-x86_64
-          cp -R Build/linux/bin/* ladybird-linux-x86_64/
-          tar -czf Ladybird-linux-x86_64.tar.gz ladybird-linux-x86_64
+            - name: Bootstrap vcpkg
+              run: |
+                  git clone https://github.com/microsoft/vcpkg.git Build/vcpkg
+                  Build/vcpkg/bootstrap-vcpkg.sh
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ladybird-linux-x86_64
-          path: Ladybird-linux-x86_64.tar.gz
+            - name: Build Ladybird x86_64
+              run: |
+                  cmake --preset Distribution -B Build/linux
+                  cmake --build Build/linux --target Ladybird -j$(nproc)
 
-  create-release:
-    needs: [build-macos, build-linux]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download macOS artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ladybird-macos-arm64
+            - name: Create tarball
+              run: |
+                  mkdir -p ladybird-linux-x86_64
+                  cp -R Build/linux/bin/* ladybird-linux-x86_64/
+                  tar -czf Ladybird-linux-x86_64.tar.gz ladybird-linux-x86_64
 
-      - name: Download Linux artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ladybird-linux-x86_64
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ladybird-linux-x86_64
+                  path: Ladybird-linux-x86_64.tar.gz
 
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+    create-release:
+        needs: [build-macos, build-linux]
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Download macOS artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: ladybird-macos-arm64
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: weekly-${{ steps.date.outputs.date }}
-          name: Weekly Build - ${{ steps.date.outputs.date }}
-          body: |
-            Automated weekly build of Ladybird browser synced from upstream.
+            - name: Download Linux artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: ladybird-linux-x86_64
 
-            **Platforms:**
-            - macOS arm64 (Apple Silicon)
-            - Linux x86_64
+            - name: Get current date
+              id: date
+              run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-            Built with Distribution preset (optimized, static libraries).
-          files: |
-            Ladybird-arm64.dmg
-            Ladybird-linux-x86_64.tar.gz
-          draft: false
-          prerelease: false
+            - name: Create Release
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: weekly-${{ steps.date.outputs.date }}
+                  name: Weekly Build - ${{ steps.date.outputs.date }}
+                  body: |
+                      Automated weekly build of Ladybird browser synced from upstream.
+
+                      **Platforms:**
+                      - macOS arm64 (Apple Silicon)
+                      - Linux x86_64
+
+                      Built with Distribution preset (optimized, static libraries).
+                  files: |
+                      Ladybird-arm64.dmg
+                      Ladybird-linux-x86_64.tar.gz
+                  draft: false
+                  prerelease: false
