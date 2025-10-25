@@ -46,7 +46,7 @@ void Worker::visit_edges(Cell::Visitor& visitor)
 // https://whatpr.org/html/9893/workers.html#dom-worker
 WebIDL::ExceptionOr<GC::Ref<Worker>> Worker::create(TrustedTypes::TrustedScriptURLOrString const& script_url, WorkerOptions const& options, DOM::Document& document)
 {
-    dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Creating worker with script_url = {}", script_url);
+    dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Creating worker");
 
     // Returns a new Worker object. scriptURL will be fetched and executed in the background,
     // creating a new global environment for which worker represents the communication channel.
