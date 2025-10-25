@@ -28,26 +28,43 @@ jobs:
 
     build-macos:
         needs: sync-upstream
-        runs-on: macos-14 # M1/M2 runner for arm64 builds
+        runs-on: macos-14
+        env:
+            LADYBIRD_SOURCE_DIR: ${{ github.workspace }}
+            CCACHE_DIR: ${{ github.workspace }}/.ccache
+            VCPKG_ROOT: ${{ github.workspace }}/Build/vcpkg
         steps:
             - name: Checkout
               uses: actions/checkout@v4
               with:
                   ref: master
 
+            - name: Select Xcode 16.4
+              uses: maxim-lobanov/setup-xcode@v1
+              with:
+                  xcode-version: "16.4"
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
             - name: Install dependencies
               run: |
-                  brew install autoconf autoconf-archive automake libtool cmake nasm ninja ccache pkg-config
+                  brew update
+                  brew install autoconf autoconf-archive automake bash ccache coreutils libtool llvm@20 nasm ninja pkg-config qt unzip wabt
 
             - name: Bootstrap vcpkg
-              run: |
-                  git clone https://github.com/microsoft/vcpkg.git Build/vcpkg
-                  cd Build/vcpkg && git checkout b0b3de1b1a0aa4b8f2822460aa7f42f991629b3f && cd ../..
-                  Build/vcpkg/bootstrap-vcpkg.sh
+              run: ./Toolchain/BuildVcpkg.py
 
             - name: Build Ladybird arm64
+              env:
+                  CC: /usr/bin/clang
+                  CXX: /usr/bin/clang++
               run: |
-                  cmake --preset Distribution -B Build/arm64 -DCMAKE_OSX_ARCHITECTURES=arm64
+                  cmake --preset Distribution -B Build/arm64 \
+                    -DCMAKE_OSX_ARCHITECTURES=arm64 \
+                    -DENABLE_CI_BASELINE_CPU=ON
                   cmake --build Build/arm64 --target Ladybird -j$(sysctl -n hw.ncpu)
 
             - name: Create DMG
@@ -67,28 +84,38 @@ jobs:
     build-linux:
         needs: sync-upstream
         runs-on: ubuntu-24.04
+        env:
+            LADYBIRD_SOURCE_DIR: ${{ github.workspace }}
+            CCACHE_DIR: ${{ github.workspace }}/.ccache
+            VCPKG_ROOT: ${{ github.workspace }}/Build/vcpkg
         steps:
             - name: Checkout
               uses: actions/checkout@v4
               with:
                   ref: master
 
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
             - name: Install dependencies
               run: |
                   sudo apt update
                   sudo apt install -y autoconf autoconf-archive automake build-essential ccache cmake \
-                    curl fonts-liberation2 libdrm-dev libgl1-mesa-dev libtool nasm ninja-build \
-                    pkg-config python3-venv qt6-base-dev qt6-tools-dev-tools qt6-wayland tar unzip zip
+                    curl fonts-liberation2 gcc-14 g++-14 libcurl4-openssl-dev libdrm-dev libegl1-mesa-dev \
+                    libgl1-mesa-dev libpulse-dev libssl-dev libstdc++-14-dev nasm ninja-build \
+                    qt6-base-dev qt6-tools-dev-tools tar unzip zip
 
             - name: Bootstrap vcpkg
-              run: |
-                  git clone https://github.com/microsoft/vcpkg.git Build/vcpkg
-                  cd Build/vcpkg && git checkout b0b3de1b1a0aa4b8f2822460aa7f42f991629b3f && cd ../..
-                  Build/vcpkg/bootstrap-vcpkg.sh
+              run: ./Toolchain/BuildVcpkg.py
 
             - name: Build Ladybird x86_64
+              env:
+                  CC: gcc-14
+                  CXX: g++-14
               run: |
-                  cmake --preset Distribution -B Build/linux
+                  cmake --preset Distribution -B Build/linux -DENABLE_CI_BASELINE_CPU=ON
                   cmake --build Build/linux --target Ladybird -j$(nproc)
 
             - name: Create tarball
