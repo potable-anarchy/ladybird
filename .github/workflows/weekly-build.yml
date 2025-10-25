@@ -42,6 +42,7 @@ jobs:
             - name: Bootstrap vcpkg
               run: |
                   git clone https://github.com/microsoft/vcpkg.git Build/vcpkg
+                  cd Build/vcpkg && git checkout b0b3de1b1a0aa4b8f2822460aa7f42f991629b3f && cd ../..
                   Build/vcpkg/bootstrap-vcpkg.sh
 
             - name: Build Ladybird arm64
@@ -82,6 +83,7 @@ jobs:
             - name: Bootstrap vcpkg
               run: |
                   git clone https://github.com/microsoft/vcpkg.git Build/vcpkg
+                  cd Build/vcpkg && git checkout b0b3de1b1a0aa4b8f2822460aa7f42f991629b3f && cd ../..
                   Build/vcpkg/bootstrap-vcpkg.sh
 
             - name: Build Ladybird x86_64
