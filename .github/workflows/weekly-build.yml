@@ -37,7 +37,7 @@ jobs:
 
             - name: Install dependencies
               run: |
-                  brew install autoconf autoconf-archive automake cmake nasm ninja ccache pkg-config
+                  brew install autoconf autoconf-archive automake libtool cmake nasm ninja ccache pkg-config
 
             - name: Bootstrap vcpkg
               run: |
