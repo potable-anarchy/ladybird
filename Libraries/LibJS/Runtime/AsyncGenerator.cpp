@@ -18,21 +18,23 @@ namespace JS {
 
 GC_DEFINE_ALLOCATOR(AsyncGenerator);
 
-ThrowCompletionOr<GC::Ref<AsyncGenerator>> AsyncGenerator::create(Realm& realm, Value initial_value, ECMAScriptFunctionObject* generating_function, NonnullOwnPtr<ExecutionContext> execution_context)
+GC::Ref<AsyncGenerator> AsyncGenerator::create(Realm& realm, Value initial_value, ECMAScriptFunctionObject* generating_function, NonnullOwnPtr<ExecutionContext> execution_context)
 {
     auto& vm = realm.vm();
     // This is "g1.prototype" in figure-2 (https://tc39.es/ecma262/img/figure-2.png)
     static Bytecode::PropertyLookupCache cache;
-    auto generating_function_prototype = TRY(generating_function->get(vm.names.prototype, cache));
-    auto generating_function_prototype_object = TRY(generating_function_prototype.to_object(vm));
+    auto generating_function_prototype = MUST(generating_function->get(vm.names.prototype, cache));
+    GC::Ptr<Object> generating_function_prototype_object = nullptr;
+    if (!generating_function_prototype.is_nullish())
+        generating_function_prototype_object = MUST(generating_function_prototype.to_object(vm));
     auto object = realm.create<AsyncGenerator>(realm, generating_function_prototype_object, move(execution_context));
     object->m_generating_function = generating_function;
     object->m_previous_value = initial_value;
     return object;
 }
 
-AsyncGenerator::AsyncGenerator(Realm&, Object& prototype, NonnullOwnPtr<ExecutionContext> context)
-    : Object(ConstructWithPrototypeTag::Tag, prototype)
+AsyncGenerator::AsyncGenerator(Realm& realm, Object* prototype, NonnullOwnPtr<ExecutionContext> context)
+    : Object(realm, prototype)
     , m_async_generator_context(move(context))
 {
 }
@@ -156,13 +158,13 @@ void AsyncGenerator::execute(VM& vm, Completion completion)
     while (true) {
         // Loosely based on step 4 of https://tc39.es/ecma262/#sec-asyncgeneratorstart
         auto generated_value = [](Value value) -> Value {
-            if (value.is_cell())
+            if (value.is_cell() && value.as_cell().is_generator_result())
                 return static_cast<GeneratorResult const&>(value.as_cell()).result();
             return value.is_special_empty_value() ? js_undefined() : value;
         };
 
         auto generated_continuation = [&](Value value) -> Optional<size_t> {
-            if (value.is_cell()) {
+            if (value.is_cell() && value.as_cell().is_generator_result()) {
                 auto number_value = static_cast<GeneratorResult const&>(value.as_cell()).continuation();
                 if (number_value.is_null())
                     return {};
@@ -172,7 +174,7 @@ void AsyncGenerator::execute(VM& vm, Completion completion)
         };
 
         auto generated_is_await = [](Value value) -> bool {
-            if (value.is_cell())
+            if (value.is_cell() && value.as_cell().is_generator_result())
                 return static_cast<GeneratorResult const&>(value.as_cell()).is_await();
             return false;
         };
@@ -186,9 +188,8 @@ void AsyncGenerator::execute(VM& vm, Completion completion)
         // We should never enter `execute` again after the generator is complete.
         VERIFY(continuation_address.has_value());
 
-        auto next_result = bytecode_interpreter.run_executable(*m_generating_function->bytecode_executable(), continuation_address, completion_cell);
+        auto result_value = bytecode_interpreter.run_executable(vm.running_execution_context(), *m_generating_function->bytecode_executable(), continuation_address, completion_cell);
 
-        auto result_value = move(next_result.value);
         if (!result_value.is_throw_completion()) {
             m_previous_value = result_value.release_value();
             auto value = generated_value(m_previous_value);

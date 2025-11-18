@@ -199,7 +199,7 @@ Optional<Utf16String> Node::text_content() const
 }
 
 // https://dom.spec.whatwg.org/#ref-for-dom-node-textcontent%E2%91%A0
-void Node::set_text_content(Optional<Utf16String> const& maybe_content)
+WebIDL::ExceptionOr<void> Node::set_text_content(Optional<Utf16String> const& maybe_content)
 {
     // The textContent setter steps are to, if the given value is null, act as if it was the empty string instead,
     // and then do as described below, switching on the interface this implements:
@@ -209,19 +209,19 @@ void Node::set_text_content(Optional<Utf16String> const& maybe_content)
     if (is<DocumentFragment>(this) || is<Element>(this)) {
         // OPTIMIZATION: Replacing nothing with nothing is a no-op. Avoid all invalidation in this case.
         if (!first_child() && content.is_empty()) {
-            return;
+            return {};
         }
         string_replace_all(content);
     }
 
     // If CharacterData, replace data with node this, offset 0, count this’s length, and data the given value.
     else if (auto* character_data = as_if<CharacterData>(*this)) {
-        MUST(character_data->replace_data(0, character_data->length_in_utf16_code_units(), content));
+        TRY(character_data->replace_data(0, character_data->length_in_utf16_code_units(), content));
     }
 
     // If Attr, set an existing attribute value with this and the given value.
     else if (auto* attribute = as_if<Attr>(*this)) {
-        attribute->set_value(content.to_utf8_but_should_be_ported_to_utf16());
+        TRY(attribute->set_value(content.to_utf8_but_should_be_ported_to_utf16()));
     }
 
     // Otherwise, do nothing.
@@ -232,6 +232,7 @@ void Node::set_text_content(Optional<Utf16String> const& maybe_content)
     }
 
     document().bump_dom_tree_version();
+    return {};
 }
 
 // https://dom.spec.whatwg.org/#dom-node-normalize
@@ -368,7 +369,7 @@ Optional<String> Node::node_value() const
 }
 
 // https://dom.spec.whatwg.org/#ref-for-dom-node-nodevalue%E2%91%A0
-void Node::set_node_value(Optional<String> const& maybe_value)
+WebIDL::ExceptionOr<void> Node::set_node_value(Optional<String> const& maybe_value)
 {
     // The nodeValue setter steps are to, if the given value is null, act as if it was the empty string instead,
     // and then do as described below, switching on the interface this implements:
@@ -376,13 +377,14 @@ void Node::set_node_value(Optional<String> const& maybe_value)
 
     // If Attr, set an existing attribute value with this and the given value.
     if (auto* attr = as_if<Attr>(this)) {
-        attr->set_value(move(value));
+        TRY(attr->set_value(move(value)));
     } else if (auto* character_data = as_if<CharacterData>(this)) {
         // If CharacterData, replace data with node this, offset 0, count this’s length, and data the given value.
         character_data->set_data(Utf16String::from_utf8(value));
     }
 
     // Otherwise, do nothing.
+    return {};
 }
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#node-navigable
@@ -418,10 +420,12 @@ void Node::invalidate_style(StyleInvalidationReason reason)
     if (is_character_data())
         return;
 
-    if (document().style_computer().may_have_has_selectors()) {
+    auto& style_scope = root().is_shadow_root() ? static_cast<ShadowRoot&>(root()).style_scope() : document().style_scope();
+
+    if (style_scope.may_have_has_selectors()) {
         if (reason == StyleInvalidationReason::NodeRemove) {
             if (auto* parent = parent_or_shadow_host(); parent) {
-                document().schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
+                style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*parent);
                 parent->for_each_child_of_type<Element>([&](auto& element) {
                     if (element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
                         element.invalidate_style_if_affected_by_has();
@@ -429,7 +433,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                 });
             }
         } else {
-            document().schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
+            style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
         }
     }
 
@@ -497,29 +501,48 @@ void Node::invalidate_style(StyleInvalidationReason reason, Vector<CSS::Invalida
     if (is_character_data())
         return;
 
+    auto& root = this->root();
+    auto& style_scope = root.is_shadow_root() ? static_cast<ShadowRoot&>(root).style_scope() : document().style_scope();
+    CSS::StyleScope* shadow_style_scope = nullptr;
+    if (auto* element = as_if<Element>(this); element && element->is_shadow_host()) {
+        if (auto element_shadow_root = element->shadow_root())
+            shadow_style_scope = &element_shadow_root->style_scope();
+    }
+
     bool properties_used_in_has_selectors = false;
     for (auto const& property : properties) {
-        properties_used_in_has_selectors |= document().style_computer().invalidation_property_used_in_has_selector(property);
+        properties_used_in_has_selectors |= document().style_computer().invalidation_property_used_in_has_selector(property, style_scope);
+        if (shadow_style_scope)
+            properties_used_in_has_selectors |= document().style_computer().invalidation_property_used_in_has_selector(property, *shadow_style_scope);
     }
     if (properties_used_in_has_selectors) {
-        document().schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
+        style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
+        if (shadow_style_scope)
+            shadow_style_scope->schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
     }
 
-    auto invalidation_set = document().style_computer().invalidation_set_for_properties(properties);
-    if (invalidation_set.needs_invalidate_whole_subtree()) {
-        invalidate_style(reason);
-        return;
-    }
+    auto invalidate_for_style_scope = [this, reason, &properties, &options](CSS::StyleScope& style_scope) {
+        auto invalidation_set = document().style_computer().invalidation_set_for_properties(properties, style_scope);
 
-    if (options.invalidate_self || invalidation_set.needs_invalidate_self()) {
-        set_needs_style_update(true);
-    }
+        if (invalidation_set.needs_invalidate_whole_subtree()) {
+            invalidate_style(reason);
+            return;
+        }
 
-    if (!invalidation_set.has_properties()) {
-        return;
-    }
+        if (options.invalidate_self || invalidation_set.needs_invalidate_self()) {
+            set_needs_style_update(true);
+        }
 
-    document().style_invalidator().add_pending_invalidation(*this, move(invalidation_set));
+        if (!invalidation_set.has_properties()) {
+            return;
+        }
+
+        document().style_invalidator().add_pending_invalidation(*this, move(invalidation_set));
+    };
+
+    invalidate_for_style_scope(style_scope);
+    if (shadow_style_scope)
+        invalidate_for_style_scope(*shadow_style_scope);
 }
 
 Utf16String Node::child_text_content() const
@@ -763,10 +786,10 @@ void Node::insert_before(GC::Ref<Node> node, GC::Ptr<Node> child, bool suppress_
     children_changed(&metadata);
 
     // 10. Let staticNodeList be a list of nodes, initially « ».
-    // Spec-Note: We collect all nodes before calling the post-connection steps on any one of them, instead of calling
-    //            the post-connection steps while we’re traversing the node tree. This is because the post-connection
-    //            steps can modify the tree’s structure, making live traversal unsafe, possibly leading to the
-    //            post-connection steps being called multiple times on the same node.
+    // NOTE: We collect all nodes before calling the post-connection steps on any one of them, instead of calling the
+    //       post-connection steps while we’re traversing the node tree. This is because the post-connection steps can
+    //       modify the tree’s structure, making live traversal unsafe, possibly leading to the post-connection steps
+    //       being called multiple times on the same node.
     GC::RootVector<GC::Ref<Node>> static_node_list(heap());
 
     // 11. For each node of nodes, in tree order:
@@ -851,11 +874,6 @@ WebIDL::ExceptionOr<GC::Ref<Node>> Node::append_child(GC::Ref<Node> node)
 {
     // To append a node to a parent, pre-insert node into parent before null.
     return pre_insert(node, nullptr);
-
-    // AD-HOC: invalidate the ordinal of the first list_item of the first child sibling of the appended node, if any.
-    // NOTE: This works since ordinal values are accessed (for layout and paint) in the preorder of list_item nodes !!
-    if (auto* first_child_element = this->first_child_of_type<Element>())
-        first_child_element->maybe_invalidate_ordinals_for_list_owner();
 }
 
 // https://dom.spec.whatwg.org/#live-range-pre-remove-steps
@@ -1667,6 +1685,16 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
                 break;
             ancestor->m_child_needs_layout_tree_update = true;
         }
+
+        // If this is an element with display: contents, we need to propagate the layout tree update to the parent.
+        if (auto* element = as_if<Element>(*this)) {
+            if (element->computed_properties() && element->computed_properties()->display().is_contents()) {
+                if (auto parent_element = element->parent_or_shadow_host_element()) {
+                    parent_element->set_needs_layout_tree_update(true, reason);
+                }
+            }
+        }
+
         if (auto layout_node = this->layout_node()) {
             layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate);
 
@@ -2089,14 +2117,14 @@ void Node::string_replace_all(Utf16String string)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#fragment-serializing-algorithm-steps
-WebIDL::ExceptionOr<String> Node::serialize_fragment(HTML::RequireWellFormed require_well_formed, FragmentSerializationMode fragment_serialization_mode) const
+WebIDL::ExceptionOr<Utf16String> Node::serialize_fragment(HTML::RequireWellFormed require_well_formed, FragmentSerializationMode fragment_serialization_mode) const
 {
     // 1. Let context document be the value of node's node document.
     auto const& context_document = document();
 
     // 2. If context document is an HTML document, return the result of HTML fragment serialization algorithm with node, false, and « ».
     if (context_document.is_html_document())
-        return HTML::HTMLParser::serialize_html_fragment(*this, HTML::HTMLParser::SerializableShadowRoots::No, {}, fragment_serialization_mode);
+        return Utf16String::from_utf8(HTML::HTMLParser::serialize_html_fragment(*this, HTML::HTMLParser::SerializableShadowRoots::No, {}, fragment_serialization_mode));
 
     // 3. Return the XML serialization of node given require well-formed.
     // AD-HOC: XML serialization algorithm returns the "outer" XML serialization of the node.
@@ -2107,9 +2135,9 @@ WebIDL::ExceptionOr<String> Node::serialize_fragment(HTML::RequireWellFormed req
             auto child_markup = TRY(HTML::serialize_node_to_xml_string(*child, require_well_formed));
             markup.append(child_markup.bytes_as_string_view());
         }
-        return MUST(markup.to_string());
+        return Utf16String::from_utf8(MUST(markup.to_string()));
     }
-    return HTML::serialize_node_to_xml_string(*this, require_well_formed);
+    return Utf16String::from_utf8(TRY(HTML::serialize_node_to_xml_string(*this, require_well_formed)));
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#unsafely-set-html

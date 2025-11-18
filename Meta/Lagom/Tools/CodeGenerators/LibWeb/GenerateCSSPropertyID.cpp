@@ -164,6 +164,7 @@ ErrorOr<void> generate_header_file(JsonObject& properties, JsonObject& logical_p
 #include <AK/Traits.h>
 #include <AK/Variant.h>
 #include <LibJS/Forward.h>
+#include <LibWeb/CSS/AcceptedTypeRange.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/ValueType.h>
 #include <LibWeb/Export.h>
@@ -259,11 +260,6 @@ bool property_is_single_valued(PropertyID);
 bool property_is_list_valued(PropertyID);
 
 bool property_accepts_type(PropertyID, ValueType);
-struct AcceptedTypeRange {
-    float min;
-    float max;
-};
-using AcceptedTypeRangeMap = HashMap<ValueType, AcceptedTypeRange>;
 AcceptedTypeRangeMap property_accepted_type_ranges(PropertyID);
 bool property_accepts_keyword(PropertyID, Keyword);
 Optional<Keyword> resolve_legacy_value_alias(PropertyID, Keyword);
@@ -338,10 +334,6 @@ Optional<LogicalPropertyGroup> logical_property_group_for_property(PropertyID);
 } // namespace Web::CSS
 
 namespace AK {
-template<>
-struct Traits<Web::CSS::PropertyID> : public DefaultTraits<Web::CSS::PropertyID> {
-    static unsigned hash(Web::CSS::PropertyID property_id) { return int_hash((unsigned)property_id); }
-};
 
 template<>
 struct Formatter<Web::CSS::PropertyID> : Formatter<StringView> {
@@ -452,8 +444,9 @@ ErrorOr<void> generate_implementation_file(JsonObject& properties, JsonObject& l
 
 namespace Web::CSS {
 
-Optional<PropertyID> property_id_from_camel_case_string(StringView string)
+static auto generate_camel_case_property_table()
 {
+    HashMap<StringView, PropertyID, CaseInsensitiveASCIIStringViewTraits> table;
 )~~~");
 
     properties.for_each_member([&](auto& name, auto& value) {
@@ -468,20 +461,24 @@ Optional<PropertyID> property_id_from_camel_case_string(StringView string)
             member_generator.set("name:titlecase", title_casify(name));
         }
         member_generator.append(R"~~~(
-    if (string.equals_ignoring_ascii_case("@name:camelcase@"sv))
-        return PropertyID::@name:titlecase@;
+    table.set("@name:camelcase@"sv, PropertyID::@name:titlecase@);
 )~~~");
     });
 
     generator.append(R"~~~(
-    return {};
+    return table;
 }
 
-Optional<PropertyID> property_id_from_string(StringView string)
-{
-    if (is_a_custom_property_name_string(string))
-        return PropertyID::Custom;
+static HashMap<StringView, PropertyID, CaseInsensitiveASCIIStringViewTraits> const camel_case_properties_table = generate_camel_case_property_table();
 
+Optional<PropertyID> property_id_from_camel_case_string(StringView string)
+{
+    return camel_case_properties_table.get(string);
+}
+
+static auto generate_properties_table()
+{
+    HashMap<StringView, PropertyID, CaseInsensitiveASCIIStringViewTraits> table;
 )~~~");
 
     properties.for_each_member([&](auto& name, auto& value) {
@@ -495,13 +492,22 @@ Optional<PropertyID> property_id_from_string(StringView string)
             member_generator.set("name:titlecase", title_casify(name));
         }
         member_generator.append(R"~~~(
-    if (string.equals_ignoring_ascii_case("@name@"sv))
-        return PropertyID::@name:titlecase@;
+    table.set("@name@"sv, PropertyID::@name:titlecase@);
 )~~~");
     });
 
     generator.append(R"~~~(
-    return {};
+    return table;
+}
+
+static HashMap<StringView, PropertyID, CaseInsensitiveASCIIStringViewTraits> const properties_table = generate_properties_table();
+
+Optional<PropertyID> property_id_from_string(StringView string)
+{
+    if (is_a_custom_property_name_string(string))
+        return PropertyID::Custom;
+
+    return properties_table.get(string);
 }
 
 FlyString const& string_from_property_id(PropertyID property_id) {

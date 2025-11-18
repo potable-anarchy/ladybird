@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/Bindings/HTMLLIElementPrototype.h>
+#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/HTML/HTMLLIElement.h>
 #include <LibWeb/HTML/Numbers.h>
@@ -49,6 +50,11 @@ WebIDL::Long HTMLLIElement::value()
     if (auto maybe_number = HTML::parse_integer(content_attribute_value); maybe_number.has_value())
         return *maybe_number;
     return 0;
+}
+
+void HTMLLIElement::set_value(WebIDL::Long value)
+{
+    set_attribute_value(AttributeNames::value, String::number(value));
 }
 
 bool HTMLLIElement::is_presentational_hint(FlyString const& name) const

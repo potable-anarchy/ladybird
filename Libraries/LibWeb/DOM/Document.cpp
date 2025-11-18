@@ -165,6 +165,8 @@
 #include <LibWeb/SVG/SVGStyleElement.h>
 #include <LibWeb/SVG/SVGTitleElement.h>
 #include <LibWeb/Selection/Selection.h>
+#include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
+#include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
 #include <LibWeb/UIEvents/CompositionEvent.h>
 #include <LibWeb/UIEvents/EventNames.h>
 #include <LibWeb/UIEvents/FocusEvent.h>
@@ -467,6 +469,7 @@ Document::Document(JS::Realm& realm, URL::URL const& url, TemporaryDocumentForFr
     , m_editing_host_manager(EditingHostManager::create(realm, *this))
     , m_dynamic_view_transition_style_sheet(parse_css_stylesheet(CSS::Parser::ParsingParams(realm), ""sv, {}))
     , m_style_invalidator(realm.heap().allocate<StyleInvalidator>())
+    , m_style_scope(*this)
 {
     m_legacy_platform_object_flags = PlatformObject::LegacyPlatformObjectFlags {
         .supports_named_properties = true,
@@ -542,6 +545,8 @@ WebIDL::ExceptionOr<void> Document::populate_with_html_head_and_body()
 void Document::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
+    m_style_scope.visit_edges(visitor);
+    visitor.visit(m_pending_css_import_rules);
     visitor.visit(m_page);
     visitor.visit(m_window);
     visitor.visit(m_layout_root);
@@ -644,41 +649,56 @@ GC::Ptr<Selection::Selection> Document::get_selection() const
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-write
-WebIDL::ExceptionOr<void> Document::write(Vector<String> const& text)
+WebIDL::ExceptionOr<void> Document::write(Vector<TrustedTypes::TrustedHTMLOrString> const& text)
 {
     // The document.write(...text) method steps are to run the document write steps with this, text, false, and "Document write".
-    return run_the_document_write_steps(text, AddLineFeed::No, TrustedTypes::InjectionSink::Documentwrite);
+    return run_the_document_write_steps(text, AddLineFeed::No, TrustedTypes::InjectionSink::Document_write);
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-document-writeln
-WebIDL::ExceptionOr<void> Document::writeln(Vector<String> const& text)
+WebIDL::ExceptionOr<void> Document::writeln(Vector<TrustedTypes::TrustedHTMLOrString> const& text)
 {
     // The document.writeln(...text) method steps are to run the document write steps with this, text, true, and "Document writeln".
-    return run_the_document_write_steps(text, AddLineFeed::Yes, TrustedTypes::InjectionSink::Documentwriteln);
+    return run_the_document_write_steps(text, AddLineFeed::Yes, TrustedTypes::InjectionSink::Document_writeln);
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#document-write-steps
-WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(Vector<String> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink)
+WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(Vector<TrustedTypes::TrustedHTMLOrString> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink)
 {
     // 1. Let string be the empty string.
     StringBuilder string;
 
     // 2. Let isTrusted be false if text contains a string; otherwise true.
-    // FIXME: We currently only accept strings. Revisit this once we support the TrustedHTML type.
     auto is_trusted = true;
+    for (auto const& value : text) {
+        if (value.has<Utf16String>()) {
+            is_trusted = false;
+            break;
+        }
+    }
 
     // 3. For each value of text:
     for (auto const& value : text) {
-        // FIXME: 1. If value is a TrustedHTML object, then append value's associated data to string.
-
-        // 2. Otherwise, append value to string.
-        string.append(value);
+        string.append(value.visit(
+                               // 1. If value is a TrustedHTML object, then append value's associated data to string.
+                               [](GC::Root<TrustedTypes::TrustedHTML> const& value) { return value->to_string(); },
+                               // 2. Otherwise, append value to string.
+                               [](Utf16String const& value) { return value; })
+                .to_utf8_but_should_be_ported_to_utf16());
     }
 
-    // FIXME: 4. If isTrusted is false, set string to the result of invoking the Get Trusted Type compliant string algorithm
+    // 4. If isTrusted is false, set string to the result of invoking the Get Trusted Type compliant string algorithm
     //    with TrustedHTML, this's relevant global object, string, sink, and "script".
-    (void)is_trusted;
-    (void)sink;
+    if (!is_trusted) {
+        auto const new_string = TRY(TrustedTypes::get_trusted_type_compliant_string(
+            TrustedTypes::TrustedTypeName::TrustedHTML,
+            relevant_global_object(*this),
+            Utf16String::from_utf8(MUST(string.to_string())),
+            sink,
+            TrustedTypes::Script.to_string()));
+        string.clear();
+        string.append(new_string.to_utf8_but_should_be_ported_to_utf16());
+    }
 
     // 5. If lineFeed is true, append U+000A LINE FEED to string.
     if (line_feed == AddLineFeed::Yes)
@@ -762,7 +782,7 @@ WebIDL::ExceptionOr<Document*> Document::open(Optional<String> const&, Optional<
 
     // FIXME: 9. For each shadow-including inclusive descendant node of document, erase all event listeners and handlers given node.
 
-    // FIXME 10. If document is the associated Document of document's relevant global object, then erase all event listeners and handlers given document's relevant global object.
+    // FIXME: 10. If document is the associated Document of document's relevant global object, then erase all event listeners and handlers given document's relevant global object.
 
     // 11. Replace all with null within document, without firing any mutation events.
     replace_all(nullptr);
@@ -1325,11 +1345,6 @@ void Document::update_layout(UpdateLayoutReason reason)
     if (!navigable || navigable->active_document() != this)
         return;
 
-    // NOTE: If our parent document needs a relayout, we must do that *first*.
-    //       This is necessary as the parent layout may cause our viewport to change.
-    if (navigable->container() && &navigable->container()->document() != this)
-        navigable->container()->document().update_layout(reason);
-
     update_style();
 
     if (m_layout_root && !m_layout_root->needs_layout_update())
@@ -1540,6 +1555,11 @@ void Document::update_layout(UpdateLayoutReason reason)
 
 void Document::update_style()
 {
+    // NOTE: If our parent document needs a relayout, we must do that *first*. This is required as it may cause the
+    // viewport to change which will can affect media query evaluation and the value of the `vw` unit.
+    if (navigable()->container() && &navigable()->container()->document() != this)
+        navigable()->container()->document().update_layout(UpdateLayoutReason::ChildDocumentStyleUpdate);
+
     if (!browsing_context())
         return;
 
@@ -1549,7 +1569,10 @@ void Document::update_style()
     // style change event. [CSS-Transitions-2]
     m_transition_generation++;
 
-    invalidate_style_of_elements_affected_by_has();
+    style_scope().invalidate_style_of_elements_affected_by_has();
+    for_each_shadow_root([&](auto& shadow_root) {
+        shadow_root.style_scope().invalidate_style_of_elements_affected_by_has();
+    });
 
     if (!m_style_invalidator->has_pending_invalidations() && !needs_full_style_update() && !needs_style_update() && !child_needs_style_update())
         return;
@@ -1769,54 +1792,13 @@ static Node* find_common_ancestor(Node* a, Node* b)
     return nullptr;
 }
 
-void Document::invalidate_style_of_elements_affected_by_has()
-{
-    if (m_pending_nodes_for_style_invalidation_due_to_presence_of_has.is_empty()) {
-        return;
-    }
-
-    ScopeGuard clear_pending_nodes_guard = [&] {
-        m_pending_nodes_for_style_invalidation_due_to_presence_of_has.clear();
-    };
-
-    // It's ok to call have_has_selectors() instead of may_have_has_selectors() here and force
-    // rule cache build, because it's going to be build soon anyway, since we could get here
-    // only from update_style().
-    if (!style_computer().have_has_selectors()) {
-        return;
-    }
-
-    auto nodes = move(m_pending_nodes_for_style_invalidation_due_to_presence_of_has);
-    for (auto const& node : nodes) {
-        if (!node)
-            continue;
-        for (auto ancestor = node.ptr(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {
-            if (!ancestor->is_element())
-                continue;
-            auto& element = static_cast<Element&>(*ancestor);
-            element.invalidate_style_if_affected_by_has();
-
-            auto* parent = ancestor->parent_or_shadow_host();
-            if (!parent)
-                return;
-
-            // If any ancestor's sibling was tested against selectors like ".a:has(+ .b)" or ".a:has(~ .b)"
-            // its style might be affected by the change in descendant node.
-            parent->for_each_child_of_type<Element>([&](auto& ancestor_sibling_element) {
-                if (ancestor_sibling_element.affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator())
-                    ancestor_sibling_element.invalidate_style_if_affected_by_has();
-                return IterationDecision::Continue;
-            });
-        }
-    }
-}
-
 void Document::invalidate_style_for_elements_affected_by_pseudo_class_change(CSS::PseudoClass pseudo_class, auto& element_slot, Node& old_new_common_ancestor, auto node)
 {
-    auto const& rules = style_computer().get_pseudo_class_rule_cache(pseudo_class);
-
     auto& root = old_new_common_ancestor.root();
     auto shadow_root = is<ShadowRoot>(root) ? static_cast<ShadowRoot const*>(&root) : nullptr;
+    auto& style_scope = shadow_root ? shadow_root->style_scope() : this->style_scope();
+
+    auto const& rules = style_scope.get_pseudo_class_rule_cache(pseudo_class);
 
     auto& style_computer = this->style_computer();
     auto does_rule_match_on_element = [&](Element const& element, CSS::MatchingRule const& rule) {
@@ -2799,7 +2781,7 @@ void Document::dispatch_events_for_animation_if_necessary(GC::Ref<Animations::An
                 name,
                 {
                     { .bubbles = true },
-                    css_animation.id(),
+                    css_animation.animation_name(),
                     elapsed_time_seconds,
                 }),
             .animation = css_animation,
@@ -2998,7 +2980,7 @@ void Document::update_readiness(HTML::DocumentReadyState readiness_value)
         auto navigable = this->navigable();
         if (navigable && navigable->is_traversable()) {
             if (!is_decoded_svg()) {
-                HTML::HTMLLinkElement::load_fallback_favicon_if_needed(*this).release_value_but_fixme_should_propagate_errors();
+                HTML::HTMLLinkElement::load_fallback_favicon_if_needed(*this);
             }
             navigable->traversable_navigable()->page().client().page_did_finish_loading(url());
         } else {
@@ -3172,7 +3154,7 @@ String Document::fg_color() const
 void Document::set_fg_color(String const& value)
 {
     if (auto* body_element = body(); body_element && !is<HTML::HTMLFrameSetElement>(*body_element))
-        MUST(body_element->set_attribute(HTML::AttributeNames::text, value));
+        body_element->set_attribute_value(HTML::AttributeNames::text, value);
 }
 
 String Document::link_color() const
@@ -3185,7 +3167,7 @@ String Document::link_color() const
 void Document::set_link_color(String const& value)
 {
     if (auto* body_element = body(); body_element && !is<HTML::HTMLFrameSetElement>(*body_element))
-        MUST(body_element->set_attribute(HTML::AttributeNames::link, value));
+        body_element->set_attribute_value(HTML::AttributeNames::link, value);
 }
 
 String Document::vlink_color() const
@@ -3198,7 +3180,7 @@ String Document::vlink_color() const
 void Document::set_vlink_color(String const& value)
 {
     if (auto* body_element = body(); body_element && !is<HTML::HTMLFrameSetElement>(*body_element))
-        MUST(body_element->set_attribute(HTML::AttributeNames::vlink, value));
+        body_element->set_attribute_value(HTML::AttributeNames::vlink, value);
 }
 
 String Document::alink_color() const
@@ -3211,7 +3193,7 @@ String Document::alink_color() const
 void Document::set_alink_color(String const& value)
 {
     if (auto* body_element = body(); body_element && !is<HTML::HTMLFrameSetElement>(*body_element))
-        MUST(body_element->set_attribute(HTML::AttributeNames::alink, value));
+        body_element->set_attribute_value(HTML::AttributeNames::alink, value);
 }
 
 String Document::bg_color() const
@@ -3224,7 +3206,7 @@ String Document::bg_color() const
 void Document::set_bg_color(String const& value)
 {
     if (auto* body_element = body(); body_element && !is<HTML::HTMLFrameSetElement>(*body_element))
-        MUST(body_element->set_attribute(HTML::AttributeNames::bgcolor, value));
+        body_element->set_attribute_value(HTML::AttributeNames::bgcolor, value);
 }
 
 String Document::dump_dom_tree_as_json() const
@@ -3469,13 +3451,25 @@ void Document::evaluate_media_queries_and_report_changes()
 void Document::evaluate_media_rules()
 {
     bool any_media_queries_changed_match_state = false;
-    for_each_active_css_style_sheet([&](CSS::CSSStyleSheet& style_sheet, auto) {
+    style_scope().for_each_active_css_style_sheet([&](CSS::CSSStyleSheet& style_sheet) {
         if (style_sheet.evaluate_media_queries(*this))
             any_media_queries_changed_match_state = true;
     });
 
+    for_each_shadow_root([&](auto& shadow_root) {
+        shadow_root.style_scope().for_each_active_css_style_sheet([&](CSS::CSSStyleSheet& style_sheet) {
+            if (style_sheet.evaluate_media_queries(*this))
+                any_media_queries_changed_match_state = true;
+        });
+    });
+
     if (any_media_queries_changed_match_state) {
-        style_computer().invalidate_rule_cache();
+        // FIXME: Make this more efficient
+        style_scope().invalidate_rule_cache();
+        for_each_shadow_root([&](auto& shadow_root) {
+            shadow_root.style_scope().invalidate_rule_cache();
+        });
+
         invalidate_style(StyleInvalidationReason::MediaQueryChangedMatchState);
     }
 }
@@ -4268,7 +4262,7 @@ void Document::abort()
 // https://html.spec.whatwg.org/multipage/document-lifecycle.html#abort-a-document-and-its-descendants
 void Document::abort_a_document_and_its_descendants()
 {
-    // FIXME 1. Assert: this is running as part of a task queued on document's relevant agent's event loop.
+    // FIXME: 1. Assert: this is running as part of a task queued on document's relevant agent's event loop.
 
     // 2. Let descendantNavigables be document's descendant navigables.
     auto descendant_navigables = this->descendant_navigables();
@@ -5455,12 +5449,7 @@ void Document::remove_replaced_animations()
 
 WebIDL::ExceptionOr<Vector<GC::Ref<Animations::Animation>>> Document::get_animations()
 {
-    Vector<GC::Ref<Animations::Animation>> relevant_animations;
-    TRY(for_each_child_of_type_fallible<Element>([&](auto& child) -> WebIDL::ExceptionOr<IterationDecision> {
-        relevant_animations.extend(TRY(child.get_animations(Animations::GetAnimationsOptions { .subtree = true })));
-        return IterationDecision::Continue;
-    }));
-    return relevant_animations;
+    return calculate_get_animations(*this);
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#dom-document-nameditem-filter
@@ -5993,32 +5982,25 @@ WebIDL::ExceptionOr<void> Document::set_adopted_style_sheets(JS::Value new_value
     return {};
 }
 
-void Document::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&, GC::Ptr<DOM::ShadowRoot>)>&& callback) const
+void Document::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const
 {
     if (m_style_sheets) {
         for (auto& style_sheet : m_style_sheets->sheets()) {
             if (!(style_sheet->is_alternate() && style_sheet->disabled()))
-                callback(*style_sheet, {});
+                callback(*style_sheet);
         }
     }
 
     if (m_adopted_style_sheets) {
         m_adopted_style_sheets->for_each<CSS::CSSStyleSheet>([&](auto& style_sheet) {
             if (!style_sheet.disabled())
-                callback(style_sheet, {});
+                callback(style_sheet);
         });
     }
 
     if (m_dynamic_view_transition_style_sheet) {
-        callback(*m_dynamic_view_transition_style_sheet, {});
+        callback(*m_dynamic_view_transition_style_sheet);
     }
-
-    for_each_shadow_root([&](auto& shadow_root) {
-        shadow_root.for_each_css_style_sheet([&](auto& style_sheet) {
-            if (!style_sheet.disabled())
-                callback(style_sheet, &shadow_root);
-        });
-    });
 }
 
 static Optional<CSS::CSSStyleSheet&> find_style_sheet_with_url(String const& url, CSS::CSSStyleSheet& style_sheet)
@@ -6303,6 +6285,10 @@ bool Document::is_render_blocked() const
     if (now > max_time_to_block_rendering_in_ms)
         return false;
 
+    // AD-HOC: Consider pending CSS @import rules as render-blocking
+    if (!m_pending_css_import_rules.is_empty())
+        return true;
+
     return !m_render_blocking_elements.is_empty() || allows_adding_render_blocking_elements();
 }
 
@@ -6345,10 +6331,19 @@ void Document::parse_html_from_a_string(StringView html)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-parsehtmlunsafe
-GC::Ref<Document> Document::parse_html_unsafe(JS::VM& vm, StringView html)
+WebIDL::ExceptionOr<GC::Root<DOM::Document>> Document::parse_html_unsafe(JS::VM& vm, TrustedTypes::TrustedHTMLOrString const& html)
 {
     auto& realm = *vm.current_realm();
-    // FIXME: 1. Let compliantHTML to the result of invoking the Get Trusted Type compliant string algorithm with TrustedHTML, this's relevant global object, html, "Document parseHTMLUnsafe", and "script".
+
+    // FIXME: update description once https://github.com/whatwg/html/issues/11778 gets solved
+    // 1. Let compliantHTML to the result of invoking the Get Trusted Type compliant string algorithm with
+    //    TrustedHTML, this's relevant global object, html, "Document parseHTMLUnsafe", and "script".
+    auto const compliant_html = TRY(TrustedTypes::get_trusted_type_compliant_string(
+        TrustedTypes::TrustedTypeName::TrustedHTML,
+        HTML::current_principal_global_object(),
+        html,
+        TrustedTypes::InjectionSink::Document_parseHTMLUnsafe,
+        TrustedTypes::Script.to_string()));
 
     // 2. Let document be a new Document, whose content type is "text/html".
     auto document = Document::create_for_fragment_parsing(realm);
@@ -6357,8 +6352,8 @@ GC::Ref<Document> Document::parse_html_unsafe(JS::VM& vm, StringView html)
     // 3. Set document's allow declarative shadow roots to true.
     document->set_allow_declarative_shadow_roots(true);
 
-    // 4. Parse HTML from a string given document and compliantHTML. // FIXME: Use compliantHTML.
-    document->parse_html_from_a_string(html);
+    // 4. Parse HTML from a string given document and compliantHTML.
+    document->parse_html_from_a_string(compliant_html.to_utf8_but_should_be_ported_to_utf16());
 
     // AD-HOC: Setting the origin to match that of the associated document matches the behavior of existing browsers.
     auto& associated_document = as<HTML::Window>(realm.global_object()).associated_document();
@@ -6908,6 +6903,16 @@ StringView to_string(UpdateLayoutReason reason)
 #undef ENUMERATE_UPDATE_LAYOUT_REASON
     }
     VERIFY_NOT_REACHED();
+}
+
+void Document::add_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CSS::CSSImportRule> rule)
+{
+    m_pending_css_import_rules.set(rule);
+}
+
+void Document::remove_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CSS::CSSImportRule> rule)
+{
+    m_pending_css_import_rules.remove(rule);
 }
 
 }

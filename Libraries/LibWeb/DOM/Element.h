@@ -15,7 +15,6 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/ShadowRootPrototype.h>
 #include <LibWeb/CSS/CascadedProperties.h>
-#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StyleProperty.h>
@@ -33,6 +32,9 @@
 #include <LibWeb/HTML/ScrollOptions.h>
 #include <LibWeb/HTML/TagNames.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
+#include <LibWeb/TrustedTypes/TrustedHTML.h>
+#include <LibWeb/TrustedTypes/TrustedScript.h>
+#include <LibWeb/TrustedTypes/TrustedScriptURL.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/WebIDL/Types.h>
 
@@ -82,7 +84,7 @@ struct CustomElementCallbackReaction {
 
 // https://dom.spec.whatwg.org/#concept-element-custom-element-state
 // An element’s custom element state is one of "undefined", "failed", "uncustomized", "precustomized", or "custom".
-enum class CustomElementState {
+enum class CustomElementState : u8 {
     Undefined,
     Failed,
     Uncustomized,
@@ -92,7 +94,7 @@ enum class CustomElementState {
 
 // https://drafts.csswg.org/css-contain/#proximity-to-the-viewport
 // An element that has content-visibility: auto is in one of three states when it comes to its proximity to the viewport:
-enum class ProximityToTheViewport {
+enum class ProximityToTheViewport : u8 {
     // - The element is close to the viewport:
     CloseToTheViewport,
     // - The element is far away from the viewport:
@@ -146,14 +148,15 @@ public:
     String get_attribute_value(FlyString const& local_name, Optional<FlyString> const& namespace_ = {}) const;
 
     Optional<String> lang() const;
+    void invalidate_lang_value();
 
-    WebIDL::ExceptionOr<void> set_attribute(FlyString const& name, String const& value);
-    WebIDL::ExceptionOr<void> set_attribute(FlyString const& name, Utf16String const& value);
+    WebIDL::ExceptionOr<void> set_attribute_for_bindings(FlyString qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> const& value);
+    WebIDL::ExceptionOr<void> set_attribute_for_bindings(FlyString qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, String> const& value);
 
-    WebIDL::ExceptionOr<void> set_attribute_ns(Optional<FlyString> const& namespace_, FlyString const& qualified_name, String const& value);
+    WebIDL::ExceptionOr<void> set_attribute_ns_for_bindings(Optional<FlyString> const& namespace_, FlyString const& qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> const& value);
     void set_attribute_value(FlyString const& local_name, String const& value, Optional<FlyString> const& prefix = {}, Optional<FlyString> const& namespace_ = {});
-    WebIDL::ExceptionOr<GC::Ptr<Attr>> set_attribute_node(Attr&);
-    WebIDL::ExceptionOr<GC::Ptr<Attr>> set_attribute_node_ns(Attr&);
+    WebIDL::ExceptionOr<GC::Ptr<Attr>> set_attribute_node_for_bindings(Attr&);
+    WebIDL::ExceptionOr<GC::Ptr<Attr>> set_attribute_node_ns_for_bindings(Attr&);
 
     void append_attribute(FlyString const& name, String const& value);
     void append_attribute(Attr&);
@@ -173,7 +176,7 @@ public:
     GC::Ptr<Attr> get_attribute_node_ns(Optional<FlyString> const& namespace_, FlyString const& name) const;
 
     GC::Ptr<DOM::Element> get_the_attribute_associated_element(FlyString const& content_attribute, GC::Ptr<DOM::Element> explicitly_set_attribute_element) const;
-    Optional<GC::RootVector<GC::Ref<DOM::Element>>> get_the_attribute_associated_elements(FlyString const& content_attribute, Optional<Vector<GC::Weak<DOM::Element>>> const& explicitly_set_attribute_elements) const;
+    Optional<GC::RootVector<GC::Ref<DOM::Element>>> get_the_attribute_associated_elements(FlyString const& content_attribute, Optional<Vector<GC::Weak<DOM::Element>> const&> explicitly_set_attribute_elements) const;
 
     DOMTokenList* class_list();
 
@@ -237,17 +240,17 @@ public:
 
     [[nodiscard]] GC::Ptr<Element const> element_to_inherit_style_from(Optional<CSS::PseudoElement>) const;
 
-    WebIDL::ExceptionOr<String> inner_html() const;
-    WebIDL::ExceptionOr<void> set_inner_html(StringView);
+    WebIDL::ExceptionOr<TrustedTypes::TrustedHTMLOrString> inner_html() const;
+    WebIDL::ExceptionOr<void> set_inner_html(TrustedTypes::TrustedHTMLOrString const&);
 
-    WebIDL::ExceptionOr<void> set_html_unsafe(StringView);
+    WebIDL::ExceptionOr<void> set_html_unsafe(TrustedTypes::TrustedHTMLOrString const&);
 
     WebIDL::ExceptionOr<String> get_html(GetHTMLOptions const&) const;
 
-    WebIDL::ExceptionOr<void> insert_adjacent_html(String const& position, String const&);
+    WebIDL::ExceptionOr<void> insert_adjacent_html(String const& position, TrustedTypes::TrustedHTMLOrString const&);
 
-    WebIDL::ExceptionOr<String> outer_html() const;
-    WebIDL::ExceptionOr<void> set_outer_html(String const&);
+    WebIDL::ExceptionOr<TrustedTypes::TrustedHTMLOrString> outer_html() const;
+    WebIDL::ExceptionOr<void> set_outer_html(TrustedTypes::TrustedHTMLOrString const&);
 
     bool is_focused() const;
     bool is_active() const;
@@ -298,6 +301,7 @@ public:
     virtual void did_receive_focus() { }
     virtual void did_lose_focus() { }
     bool should_indicate_focus() const;
+    virtual bool is_focusable() const override;
 
     static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, GC::Ref<CSS::ComputedProperties>, Element*);
 
@@ -334,20 +338,9 @@ public:
     ErrorOr<void> scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> = {});
 
     // https://www.w3.org/TR/wai-aria-1.2/#ARIAMixin
-#define __ENUMERATE_ARIA_ATTRIBUTE(name, attribute)                              \
-    Optional<String> name() const override                                       \
-    {                                                                            \
-        return get_attribute(ARIA::AttributeNames::name);                        \
-    }                                                                            \
-                                                                                 \
-    WebIDL::ExceptionOr<void> set_##name(Optional<String> const& value) override \
-    {                                                                            \
-        if (value.has_value())                                                   \
-            TRY(set_attribute(ARIA::AttributeNames::name, *value));              \
-        else                                                                     \
-            remove_attribute(ARIA::AttributeNames::name);                        \
-        return {};                                                               \
-    }
+#define __ENUMERATE_ARIA_ATTRIBUTE(name, attribute) \
+    virtual Optional<String> name() const override; \
+    virtual void set_##name(Optional<String> const& value) override;
     ENUMERATE_ARIA_ATTRIBUTES
 #undef __ENUMERATE_ARIA_ATTRIBUTE
 
@@ -495,41 +488,6 @@ public:
     void maybe_invalidate_ordinals_for_list_owner(Optional<Element*> skip_node = {});
     i32 ordinal_value();
 
-    template<typename Callback>
-    void for_each_numbered_item_owned_by_list_owner(Callback callback) const
-    {
-        const_cast<Element*>(this)->for_each_numbered_item_owned_by_list_owner(move(callback));
-    }
-
-    template<typename Callback>
-    void for_each_numbered_item_owned_by_list_owner(Callback callback)
-    {
-        for (auto* node = this->first_child(); node != nullptr; node = node->next_in_pre_order(this)) {
-            auto* element = as_if<Element>(node);
-            if (!element)
-                continue;
-
-            element->m_is_contained_in_list_subtree = true;
-
-            if (node->is_html_ol_ul_menu_element()) {
-                // Skip list nodes and their descendents. They have their own, unrelated ordinals.
-                while (node->last_child() != nullptr) // Find the last node (preorder) in the subtree headed by node. O(1).
-                    node = node->last_child();
-
-                continue;
-            }
-
-            if (!node->layout_node())
-                continue; // Skip nodes that do not participate in the layout.
-
-            if (!element->computed_properties()->display().is_list_item())
-                continue; // Skip nodes that are not list items.
-
-            if (callback(element) == IterationDecision::Break)
-                return;
-        }
-    }
-
     bool captured_in_a_view_transition() const { return m_captured_in_a_view_transition; }
     void set_captured_in_a_view_transition(bool value) { m_captured_in_a_view_transition = value; }
 
@@ -590,6 +548,15 @@ private:
     Optional<Directionality> contained_text_auto_directionality(bool can_exclude_root) const;
     Directionality parent_directionality() const;
 
+    template<typename Callback>
+    void for_each_numbered_item_owned_by_list_owner(Callback callback) const
+    {
+        const_cast<Element*>(this)->for_each_numbered_item_owned_by_list_owner(move(callback));
+    }
+
+    template<typename Callback>
+    void for_each_numbered_item_owned_by_list_owner(Callback callback);
+
     QualifiedName m_qualified_name;
     mutable Optional<FlyString> m_html_uppercased_qualified_name;
 
@@ -619,9 +586,6 @@ private:
     // All elements have an associated custom element reaction queue, initially empty. Each item in the custom element reaction queue is of one of two types:
     // NOTE: See the structs at the top of this header.
     OwnPtr<CustomElementReactionQueue> m_custom_element_reaction_queue;
-
-    // https://dom.spec.whatwg.org/#concept-element-custom-element-state
-    CustomElementState m_custom_element_state { CustomElementState::Undefined };
 
     // https://dom.spec.whatwg.org/#concept-element-custom-element-definition
     GC::Ptr<HTML::CustomElementDefinition> m_custom_element_definition;
@@ -659,6 +623,13 @@ private:
 
     size_t m_sibling_invalidation_distance { 0 };
 
+    OwnPtr<CSS::CountersSet> m_counters_set;
+
+    // https://html.spec.whatwg.org/multipage/grouping-content.html#ordinal-value
+    Optional<i32> m_ordinal_value;
+
+    mutable Optional<String> m_lang_value;
+
     // https://w3c.github.io/webappsec-csp/#is-element-nonceable
     // AD-HOC: We need to know the element had a duplicate attribute when it was created from the HTML parser.
     //         However, there currently isn't any specified way to do this, so we store a flag on the token, which is
@@ -666,7 +637,8 @@ private:
     //         flag is set.
     bool m_had_duplicate_attribute_during_tokenization { false };
 
-    OwnPtr<CSS::CountersSet> m_counters_set;
+    // https://dom.spec.whatwg.org/#concept-element-custom-element-state
+    CustomElementState m_custom_element_state { CustomElementState::Undefined };
 
     // https://drafts.csswg.org/css-contain/#proximity-to-the-viewport
     ProximityToTheViewport m_proximity_to_the_viewport { ProximityToTheViewport::NotDetermined };
@@ -674,8 +646,6 @@ private:
     // https://drafts.csswg.org/css-view-transitions-1/#captured-in-a-view-transition
     bool m_captured_in_a_view_transition { false };
 
-    // https://html.spec.whatwg.org/multipage/grouping-content.html#ordinal-value
-    Optional<i32> m_ordinal_value;
     bool m_is_contained_in_list_subtree { false };
 };
 

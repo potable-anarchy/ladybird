@@ -31,6 +31,7 @@
 #include <LibWeb/HTML/AudioPlayState.h>
 #include <LibWeb/HTML/ColorPickerUpdateState.h>
 #include <LibWeb/HTML/FileFilter.h>
+#include <LibWeb/HTML/HTMLMediaElement.h>
 #include <LibWeb/HTML/SelectItem.h>
 #include <LibWeb/HTML/TokenizedFeatures.h>
 #include <LibWeb/HTML/WebViewHints.h>
@@ -182,6 +183,8 @@ public:
     void register_media_element(Badge<HTML::HTMLMediaElement>, UniqueNodeID media_id);
     void unregister_media_element(Badge<HTML::HTMLMediaElement>, UniqueNodeID media_id);
 
+    void update_all_media_element_video_sinks();
+
     struct MediaContextMenu {
         URL::URL media_url;
         bool is_video { false };
@@ -191,10 +194,10 @@ public:
         bool is_looping { false };
     };
     void did_request_media_context_menu(UniqueNodeID media_id, CSSPixelPoint, ByteString const& target, unsigned modifiers, MediaContextMenu const&);
-    WebIDL::ExceptionOr<void> toggle_media_play_state();
+    void toggle_media_play_state();
     void toggle_media_mute_state();
-    WebIDL::ExceptionOr<void> toggle_media_loop_state();
-    WebIDL::ExceptionOr<void> toggle_media_controls_state();
+    void toggle_media_loop_state();
+    void toggle_media_controls_state();
 
     HTML::MuteState page_mute_state() const { return m_mute_state; }
     void toggle_page_mute_state();
@@ -232,6 +235,15 @@ private:
     virtual void visit_edges(Visitor&) override;
 
     GC::Ptr<HTML::HTMLMediaElement> media_context_menu_element();
+
+    template<typename Callback>
+    void for_each_media_element(Callback&& callback)
+    {
+        for (auto media_id : m_media_elements) {
+            if (auto* node = DOM::Node::from_unique_id(media_id))
+                callback(as<HTML::HTMLMediaElement>(*node));
+        }
+    }
 
     Vector<GC::Root<DOM::Document>> documents_in_active_window() const;
 

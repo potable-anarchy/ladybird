@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/GenericShorthands.h>
 #include <AK/StringBuilder.h>
 #include <AK/Utf8View.h>
 #include <LibWeb/CSS/Parser/ComponentValue.h>
+#include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/Infra/Strings.h>
 
@@ -127,66 +129,6 @@ void serialize_unicode_ranges(StringBuilder& builder, Vector<Gfx::UnicodeRange> 
     });
 }
 
-namespace {
-
-char nth_digit(u32 value, u8 digit)
-{
-    // This helper is used to format integers.
-    // nth_digit(745, 1) -> '5'
-    // nth_digit(745, 2) -> '4'
-    // nth_digit(745, 3) -> '7'
-
-    VERIFY(value < 1000);
-    VERIFY(digit <= 3);
-    VERIFY(digit > 0);
-
-    while (digit > 1) {
-        value /= 10;
-        digit--;
-    }
-
-    return '0' + value % 10;
-}
-
-Array<char, 4> format_to_8bit_compatible(u8 value)
-{
-    // This function formats to the shortest string that roundtrips at 8 bits.
-    // As an example:
-    //      127 / 255 = 0.498 ± 0.001
-    //      128 / 255 = 0.502 ± 0.001
-    // But round(.5 * 255) == 128, so this function returns (note that it's only the fractional part):
-    //      127 -> "498"
-    //      128 -> "5"
-
-    u32 const three_digits = (value * 1000u + 127) / 255;
-    u32 const rounded_to_two_digits = (three_digits + 5) / 10 * 10;
-
-    if ((rounded_to_two_digits * 255 / 100 + 5) / 10 != value)
-        return { nth_digit(three_digits, 3), nth_digit(three_digits, 2), nth_digit(three_digits, 1), '\0' };
-
-    u32 const rounded_to_one_digit = (three_digits + 50) / 100 * 100;
-    if ((rounded_to_one_digit * 255 / 100 + 5) / 10 != value)
-        return { nth_digit(rounded_to_two_digits, 3), nth_digit(rounded_to_two_digits, 2), '\0', '\0' };
-
-    return { nth_digit(rounded_to_one_digit, 3), '\0', '\0', '\0' };
-}
-
-}
-
-// https://www.w3.org/TR/css-color-4/#serializing-sRGB-values
-void serialize_a_srgb_value(StringBuilder& builder, Color color)
-{
-    // The serialized form is derived from the computed value and thus, uses either the rgb() or rgba() form
-    // (depending on whether the alpha is exactly 1, or not), with lowercase letters for the function name.
-    // NOTE: Since we use Gfx::Color, having an "alpha of 1" means its value is 255.
-    if (color.alpha() == 0)
-        builder.appendff("rgba({}, {}, {}, 0)", color.red(), color.green(), color.blue());
-    else if (color.alpha() == 255)
-        builder.appendff("rgb({}, {}, {})", color.red(), color.green(), color.blue());
-    else
-        builder.appendff("rgba({}, {}, {}, 0.{})", color.red(), color.green(), color.blue(), format_to_8bit_compatible(color.alpha()).data());
-}
-
 // https://drafts.csswg.org/cssom/#serialize-a-css-value
 void serialize_a_number(StringBuilder& builder, double value)
 {
@@ -215,13 +157,6 @@ String serialize_a_url(StringView url)
 {
     StringBuilder builder;
     serialize_a_url(builder, url);
-    return builder.to_string_without_validation();
-}
-
-String serialize_a_srgb_value(Color color)
-{
-    StringBuilder builder;
-    serialize_a_srgb_value(builder, color);
     return builder.to_string_without_validation();
 }
 
@@ -266,12 +201,110 @@ String serialize_a_css_declaration(StringView property, StringView value, Import
 }
 
 // https://drafts.csswg.org/css-syntax/#serialization
-String serialize_a_series_of_component_values(ReadonlySpan<Parser::ComponentValue> component_values, InsertWhitespace insert_whitespace)
+static bool needs_comment_between(Parser::ComponentValue const& first, Parser::ComponentValue const& second)
 {
-    // FIXME: There are special rules here where we should insert a comment between certain tokens. Do that!
-    if (insert_whitespace == InsertWhitespace::Yes)
-        return MUST(Infra::strip_and_collapse_whitespace(MUST(String::join(' ', component_values))));
-    return MUST(String::join(""sv, component_values));
+    // For any consecutive pair of tokens, if the first token shows up in the row headings of the following table, and
+    // the second token shows up in the column headings, and there’s a ✗ in the cell denoted by the intersection of the
+    // chosen row and column, the pair of tokens must be serialized with a comment between them.
+    //
+    // If the tokenizer preserves comments, and there were comments originally between the token pair, the preserved
+    // comment(s) should be used; otherwise, an empty comment (/**/) must be inserted. (Preserved comments may be
+    // reinserted even if the following tables don’t require a comment between two tokens.)
+    //
+    // Single characters in the row and column headings represent a <delim-token> with that value, except for "(",
+    // which represents a (-token.
+    //
+    //            │ ident │ function │ url │ bad url │ - │ number │ percentage │ dimension │ CDC │ ( │ * │ %
+    // ───────────┼───────┼──────────┼─────┼─────────┼───┼────────┼────────────┼───────────┼─────┼───┼───┼───
+    // ident      │ ✗     │ ✗        │ ✗   │ ✗       │ ✗ │ ✗      │ ✗          │ ✗         │ ✗   │ ✗ │   │
+    // at-keyword │ ✗     │ ✗        │ ✗   │ ✗       │ ✗ │ ✗      │ ✗          │ ✗         │ ✗   │   │   │
+    // hash       │ ✗     │ ✗        │ ✗   │ ✗       │ ✗ │ ✗      │ ✗          │ ✗         │ ✗   │   │   │
+    // dimension  │ ✗     │ ✗        │ ✗   │ ✗       │ ✗ │ ✗      │ ✗          │ ✗         │ ✗   │   │   │
+    // #          │ ✗     │ ✗        │ ✗   │ ✗       │ ✗ │ ✗      │ ✗          │ ✗         │ ✗   │   │   │
+    // -          │ ✗     │ ✗        │ ✗   │ ✗       │ ✗ │ ✗      │ ✗          │ ✗         │ ✗   │   │   │
+    // number     │ ✗     │ ✗        │ ✗   │ ✗       │   │ ✗      │ ✗          │ ✗         │ ✗   │   │   │ ✗
+    // @          │ ✗     │ ✗        │ ✗   │ ✗       │ ✗ │        │            │           │ ✗   │   │   │
+    // .          │       │          │     │         │   │ ✗      │ ✗          │ ✗         │     │   │   │
+    // +          │       │          │     │         │   │ ✗      │ ✗          │ ✗         │     │   │   │
+    // /          │       │          │     │         │   │        │            │           │     │   │ ✗ │
+
+    if (first.is(Parser::Token::Type::Ident)) {
+        if (second.is_function())
+            return true;
+        // NB: ( may also be part of a block.
+        if (second.is_block() && second.block().is_paren())
+            return true;
+        if (!second.is_token())
+            return false;
+        if (second.token().type() == Parser::Token::Type::Delim)
+            return second.is_delim('-') || second.is_delim('(');
+        return first_is_one_of(second.token().type(),
+            Parser::Token::Type::Ident, Parser::Token::Type::Url, Parser::Token::Type::BadUrl, Parser::Token::Type::Number, Parser::Token::Type::Percentage, Parser::Token::Type::Dimension, Parser::Token::Type::CDC);
+    }
+
+    if (first.is(Parser::Token::Type::AtKeyword)
+        || first.is(Parser::Token::Type::Hash)
+        || first.is(Parser::Token::Type::Dimension)
+        || first.is_delim('#')
+        || first.is_delim('-')) {
+        if (second.is_function())
+            return true;
+        if (!second.is_token())
+            return false;
+        if (second.token().type() == Parser::Token::Type::Delim)
+            return second.token().delim() == '-';
+        return first_is_one_of(second.token().type(),
+            Parser::Token::Type::Ident, Parser::Token::Type::Url, Parser::Token::Type::BadUrl, Parser::Token::Type::Number, Parser::Token::Type::Percentage, Parser::Token::Type::Dimension, Parser::Token::Type::CDC);
+    }
+
+    if (first.is(Parser::Token::Type::Number)) {
+        if (second.is_function())
+            return true;
+        if (!second.is_token())
+            return false;
+        if (second.token().type() == Parser::Token::Type::Delim)
+            return second.token().delim() == '%';
+        return first_is_one_of(second.token().type(),
+            Parser::Token::Type::Ident, Parser::Token::Type::Url, Parser::Token::Type::BadUrl, Parser::Token::Type::Number, Parser::Token::Type::Percentage, Parser::Token::Type::Dimension, Parser::Token::Type::CDC);
+    }
+
+    if (first.is_delim('@')) {
+        if (second.is_function())
+            return true;
+        if (!second.is_token())
+            return false;
+        if (second.token().type() == Parser::Token::Type::Delim)
+            return second.token().delim() == '-';
+        return first_is_one_of(second.token().type(),
+            Parser::Token::Type::Ident, Parser::Token::Type::Url, Parser::Token::Type::BadUrl, Parser::Token::Type::CDC);
+    }
+
+    if (first.is_delim('.') || first.is_delim('+')) {
+        return second.is(Parser::Token::Type::Number) || second.is(Parser::Token::Type::Percentage) || second.is(Parser::Token::Type::Dimension);
+    }
+
+    if (first.is_delim('/')) {
+        return second.is_delim('*');
+    }
+
+    return false;
+}
+
+// https://drafts.csswg.org/css-syntax/#serialization
+String serialize_a_series_of_component_values(ReadonlySpan<Parser::ComponentValue> component_values)
+{
+    Parser::TokenStream tokens { component_values };
+    StringBuilder builder;
+
+    while (tokens.has_next_token()) {
+        auto const& current_token = tokens.consume_a_token();
+        auto const& next_token = tokens.next_token();
+        builder.append(current_token.to_string());
+        if (needs_comment_between(current_token, next_token))
+            builder.append("/**/"sv);
+    }
+
+    return builder.to_string_without_validation();
 }
 
 }

@@ -60,7 +60,7 @@ DecoderErrorOr<NonnullOwnPtr<FFmpegVideoDecoder>> FFmpegVideoDecoder::try_create
         return DecoderError::format(DecoderErrorCategory::Memory, "Failed to allocate FFmpeg codec context for codec {}", codec_id);
 
     codec_context->get_format = negotiate_output_format;
-
+    codec_context->time_base = { 1, 1'000'000 };
     codec_context->thread_count = static_cast<int>(min(Core::System::hardware_concurrency(), 4));
 
     if (!codec_initialization_data.is_empty()) {
@@ -128,6 +128,17 @@ DecoderErrorOr<void> FFmpegVideoDecoder::receive_coded_data(AK::Duration timesta
     default:
         return DecoderError::with_description(DecoderErrorCategory::Corrupted, "FFmpeg codec reports that the data is corrupted"sv);
     }
+}
+
+void FFmpegVideoDecoder::signal_end_of_stream()
+{
+    m_packet->data = nullptr;
+    m_packet->size = 0;
+    m_packet->pts = 0;
+    m_packet->dts = 0;
+
+    auto result = avcodec_send_packet(m_codec_context, m_packet);
+    VERIFY(result == 0 || result == AVERROR_EOF);
 }
 
 DecoderErrorOr<NonnullOwnPtr<VideoFrame>> FFmpegVideoDecoder::get_decoded_frame()

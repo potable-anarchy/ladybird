@@ -874,8 +874,10 @@ EventResult EventHandler::handle_mousemove(CSSPixelPoint visual_viewport_positio
         }
 
         if (is_hovering_link) {
-            page.set_is_hovering_link(true);
-            page.client().page_did_hover_link(*document.encoding_parse_url(hovered_link_element->href()));
+            if (auto link_url = document.encoding_parse_url(hovered_link_element->href()); link_url.has_value()) {
+                page.set_is_hovering_link(true);
+                page.client().page_did_hover_link(*link_url);
+            }
         } else if (page.is_hovering_link()) {
             page.set_is_hovering_link(false);
             page.client().page_did_unhover_link();
@@ -1303,7 +1305,7 @@ EventResult EventHandler::handle_keydown(UIEvents::KeyCode key, u32 modifiers, u
 
     auto focused_area = m_navigable->active_document()->focused_area();
     if (auto* media_element = as_if<HTML::HTMLMediaElement>(focused_area.ptr())) {
-        if (media_element->handle_keydown({}, key, modifiers).release_value_but_fixme_should_propagate_errors())
+        if (media_element->handle_keydown({}, key, modifiers))
             return EventResult::Handled;
     }
 

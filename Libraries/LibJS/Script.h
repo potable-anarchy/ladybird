@@ -47,7 +47,7 @@ public:
     StringView filename() const LIFETIME_BOUND { return m_filename; }
 
 private:
-    Script(Realm&, StringView filename, NonnullRefPtr<Program>, HostDefined* = nullptr);
+    Script(Realm&, StringView filename, NonnullRefPtr<Program>, HostDefined*);
 
     virtual void visit_edges(Cell::Visitor&) override;
 

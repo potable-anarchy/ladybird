@@ -11,6 +11,7 @@
 #include <LibGfx/Font/FontStyleMapping.h>
 #include <LibGfx/Font/FontWeight.h>
 #include <LibWeb/CSS/CSSStyleValue.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AnchorSizeStyleValue.h>
@@ -151,6 +152,17 @@ GC::Ref<CSSStyleValue> StyleValue::reify(JS::Realm& realm, FlyString const& asso
 {
     // 1. Return a new CSSStyleValue object representing value whose [[associatedProperty]] internal slot is set to property.
     return CSSStyleValue::create(realm, associated_property, *this);
+}
+
+// https://drafts.css-houdini.org/css-typed-om-1/#subdivide-into-iterations
+StyleValueVector StyleValue::subdivide_into_iterations(PropertyNameAndID const&) const
+{
+    // To subdivide into iterations a CSS value whole value for a property property, execute the following steps:
+    // 1. If property is a single-valued property, return a list containing whole value.
+    // 2. Otherwise, divide whole value into individual iterations, as appropriate for property, and return a list
+    //    containing the iterations in order.
+    // NB: We do this by type. By default, we assume step 1 applies. For step 2, override this method.
+    return StyleValueVector { *this };
 }
 
 }

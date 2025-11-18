@@ -237,7 +237,7 @@ static void update(JS::VM& vm, GC::Ref<Job> job)
         // 4. If the isTopLevel flag is unset, then return the result of fetching request.
         // FIXME: Needs spec issue, this wording is confusing and contradicts the way perform the fetch hook is used in `run a worker`
         if (top_level == HTML::TopLevelModule::No) {
-            TRY(Web::Fetch::Fetching::fetch(realm, request, Web::Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
+            Web::Fetch::Fetching::fetch(realm, request, Web::Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
             return {};
         }
 
@@ -353,7 +353,7 @@ static void update(JS::VM& vm, GC::Ref<Job> job)
                     // 1. For each importUrl → storedResponse of newestWorker’s script resource map:
                     if (false) {
                         // FIXME: 1. If importUrl is url, then continue.
-                        // FIXME 2. Let importRequest be a new request whose url is importUrl, client is job’s client, destination is "script", parser metadata
+                        // FIXME: 2. Let importRequest be a new request whose url is importUrl, client is job’s client, destination is "script", parser metadata
                         //    is "not parser-inserted", and whose use-URL-credentials flag is set.
                         // FIXME: 3. Set importRequest’s cache mode to "no-cache" if any of the following are true:
                         //     * registration’s update via cache mode is "none".
@@ -376,7 +376,7 @@ static void update(JS::VM& vm, GC::Ref<Job> job)
             process_response_completion_result = WebIDL::ExceptionOr<void> {};
         };
 
-        auto fetch_controller = TRY(Web::Fetch::Fetching::fetch(realm, request, Web::Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
+        auto fetch_controller = Web::Fetch::Fetching::fetch(realm, request, Web::Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
 
         // FIXME: This feels.. uncomfortable but it should work to block the current task until the fetch has progressed past our processResponse hook or aborted
         auto& event_loop = job->client ? job->client->responsible_event_loop() : HTML::main_thread_event_loop();
@@ -455,6 +455,7 @@ static void update(JS::VM& vm, GC::Ref<Job> job)
         // FIXME: Credentials mode
         // FIXME: Use a 'stub' service worker ESO as the fetch "environment"
         (void)HTML::fetch_module_worker_script_graph(job->script_url, *job->client, Fetch::Infrastructure::Request::Destination::ServiceWorker, *job->client, perform_the_fetch_hook, on_fetch_complete);
+        break;
     }
 }
 
@@ -498,9 +499,8 @@ static void run_job(JS::VM& vm, JobQueue& job_queue)
     });
 
     // FIXME: How does the user agent ensure this happens? Is this a normative note?
-    // Spec-Note:
-    // For a register job and an update job, the user agent delays queuing a task for running the job
-    // until after a DOMContentLoaded event has been dispatched to the document that initiated the job.
+    // NOTE: For a register job and an update job, the user agent delays queuing a task for running the job until after
+    //       a DOMContentLoaded event has been dispatched to the document that initiated the job.
 
     // FIXME: Spec should be updated to avoid 'queue a task' and use 'queue a global task' instead
     // FIXME: On which task source? On which event loop? On behalf of which document?

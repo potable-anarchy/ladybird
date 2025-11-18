@@ -127,6 +127,9 @@ void DisplayListPlayer::execute_impl(DisplayList& display_list, ScrollStateSnaps
 
     auto translate_command_by_scroll = [&](auto& command, int scroll_frame_id) {
         auto cumulative_offset = scroll_state.cumulative_offset_for_frame_with_id(scroll_frame_id);
+        if (cumulative_offset.is_zero())
+            return;
+
         auto scroll_offset = cumulative_offset.to_type<double>().scaled(device_pixels_per_css_pixel).to_type<int>();
         command.visit(
             [scroll_offset](auto& command) {
@@ -255,7 +258,7 @@ void DisplayListPlayer::execute_impl(DisplayList& display_list, ScrollStateSnaps
         else HANDLE_COMMAND(PaintNestedDisplayList, paint_nested_display_list)
         else HANDLE_COMMAND(ApplyOpacity, apply_opacity)
         else HANDLE_COMMAND(ApplyCompositeAndBlendingOperator, apply_composite_and_blending_operator)
-        else HANDLE_COMMAND(ApplyFilter, apply_filters)
+        else HANDLE_COMMAND(ApplyFilter, apply_filter)
         else HANDLE_COMMAND(ApplyTransform, apply_transform)
         else HANDLE_COMMAND(ApplyMaskBitmap, apply_mask_bitmap)
         else VERIFY_NOT_REACHED();

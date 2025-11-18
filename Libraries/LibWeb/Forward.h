@@ -370,6 +370,7 @@ class StringStyleValue;
 class StyleComputer;
 class StylePropertyMap;
 class StylePropertyMapReadOnly;
+class StyleScope;
 class StyleSheet;
 class StyleSheetList;
 class StyleValue;
@@ -394,13 +395,18 @@ class VisualViewport;
 enum class Keyword : u16;
 enum class MediaFeatureID : u8;
 enum class PropertyID : u16;
+enum class PaintOrder : u8;
+enum class ValueType : u8;
 
 struct BackgroundLayerData;
 struct CalculationContext;
 struct CalculationResolutionContext;
 struct CSSStyleSheetInit;
 struct GridRepeatParams;
+struct LogicalAliasMappingContext;
 struct StyleSheetIdentifier;
+
+using PaintOrderList = Array<PaintOrder, 3>;
 
 }
 
@@ -983,7 +989,6 @@ class AutoplayAllowlist;
 
 namespace Web::Platform {
 
-class AudioCodecPlugin;
 class Timer;
 
 }
@@ -1088,10 +1093,13 @@ namespace Web::SVG {
 class Path;
 class SVGAnimatedEnumeration;
 class SVGAnimatedLength;
-class SVGAnimationElement;
+class SVGAnimatedNumber;
+class SVGAnimatedNumberList;
 class SVGAnimatedRect;
+class SVGAnimationElement;
 class SVGCircleElement;
 class SVGClipPathElement;
+class SVGComponentTransferFunctionElement;
 class SVGDecodedImageData;
 class SVGDefsElement;
 class SVGDescElement;
@@ -1099,10 +1107,16 @@ class SVGElement;
 class SVGEllipseElement;
 class SVGFEBlendElement;
 class SVGFEColorMatrixElement;
+class SVGFEComponentTransferElement;
 class SVGFECompositeElement;
 class SVGFEFloodElement;
+class SVGFEFuncAElement;
+class SVGFEFuncBElement;
+class SVGFEFuncGElement;
+class SVGFEFuncRElement;
 class SVGFEGaussianBlurElement;
 class SVGFEImageElement;
+class SVGFEMorphologyElement;
 class SVGFilterElement;
 class SVGFitToViewBox;
 class SVGForeignObjectElement;
@@ -1113,6 +1127,8 @@ class SVGLength;
 class SVGLineElement;
 class SVGMaskElement;
 class SVGMetadataElement;
+class SVGNumber;
+class SVGNumberList;
 class SVGPathElement;
 class SVGPolygonElement;
 class SVGPolylineElement;
@@ -1232,6 +1248,7 @@ class EXTColorBufferFloat;
 class EXTRenderSnorm;
 class EXTTextureFilterAnisotropic;
 class EXTTextureNorm16;
+class OESStandardDerivatives;
 class OESVertexArrayObject;
 class WebGLCompressedTextureS3tc;
 class WebGLCompressedTextureS3tcSrgb;

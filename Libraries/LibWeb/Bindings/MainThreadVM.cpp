@@ -125,8 +125,10 @@ void initialize_main_thread_vm(AgentType type)
     };
 
     // 8.1.6.3 HostGetCodeForEval(argument), https://html.spec.whatwg.org/multipage/webappapis.html#hostgetcodeforeval(argument)
-    s_main_thread_vm->host_get_code_for_eval = [](JS::Object const&) -> GC::Ptr<JS::PrimitiveString> {
-        // FIXME: 1. If argument is a TrustedScript object, then return argument's data.
+    s_main_thread_vm->host_get_code_for_eval = [](JS::Object const& argument) -> GC::Ptr<JS::PrimitiveString> {
+        // 1. If argument is a TrustedScript object, then return argument's data.
+        if (auto const* trusted_script = as_if<TrustedTypes::TrustedScript>(argument); trusted_script)
+            return JS::PrimitiveString::create(argument.vm(), trusted_script->to_string());
 
         // 2. Otherwise, return no-code.
         return {};
@@ -533,12 +535,12 @@ void initialize_main_thread_vm(AgentType type)
                     return;
                 }
 
-                // Spec-Note: This step is essentially validating all of the requested module specifiers and type attributes
-                //            when the first call to HostLoadImportedModule for a static module dependency list is made, to
-                //            avoid further loading operations in the case any one of the dependencies has a static error.
-                //            We treat a module with unresolvable module specifiers or unsupported type attributes the same
-                //            as one that cannot be parsed; in both cases, a syntactic issue makes it impossible to ever
-                //            contemplate linking the module later.
+                // NOTE: This step is essentially validating all of the requested module specifiers and type attributes
+                //       when the first call to HostLoadImportedModule for a static module dependency list is made, to
+                //       avoid further loading operations in the case any one of the dependencies has a static error. We
+                //       treat a module with unresolvable module specifiers or unsupported type attributes the same as
+                //       one that cannot be parsed; in both cases, a syntactic issue makes it impossible to ever
+                //       contemplate linking the module later.
             }
         }
 

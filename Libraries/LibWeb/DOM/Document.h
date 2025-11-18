@@ -24,6 +24,7 @@
 #include <LibWeb/CSS/CSSPropertyRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/EnvironmentVariable.h>
+#include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/DOM/ParentNode.h>
@@ -71,56 +72,61 @@ enum class InvalidateLayoutTreeReason {
 
 [[nodiscard]] StringView to_string(InvalidateLayoutTreeReason);
 
-#define ENUMERATE_UPDATE_LAYOUT_REASONS(X) \
-    X(CanvasRenderingContext2DSetFilter)   \
-    X(CursorBlinkTimer)                    \
-    X(Debugging)                           \
-    X(DocumentElementFromPoint)            \
-    X(DocumentElementsFromPoint)           \
-    X(DocumentFindMatchingText)            \
-    X(DocumentSetDesignMode)               \
-    X(DumpDisplayList)                     \
-    X(ElementCheckVisibility)              \
-    X(ElementClientHeight)                 \
-    X(ElementClientLeft)                   \
-    X(ElementClientTop)                    \
-    X(ElementClientWidth)                  \
-    X(ElementGetClientRects)               \
-    X(ElementIsPotentiallyScrollable)      \
-    X(ElementScroll)                       \
-    X(ElementScrollHeight)                 \
-    X(ElementScrollIntoView)               \
-    X(ElementScrollLeft)                   \
-    X(ElementScrollTop)                    \
-    X(ElementScrollWidth)                  \
-    X(ElementSetScrollLeft)                \
-    X(ElementSetScrollTop)                 \
-    X(EventHandlerHandleDoubleClick)       \
-    X(EventHandlerHandleDragAndDrop)       \
-    X(EventHandlerHandleMouseDown)         \
-    X(EventHandlerHandleMouseMove)         \
-    X(EventHandlerHandleMouseUp)           \
-    X(EventHandlerHandleMouseWheel)        \
-    X(HTMLElementGetTheTextSteps)          \
-    X(HTMLElementOffsetHeight)             \
-    X(HTMLElementOffsetLeft)               \
-    X(HTMLElementOffsetParent)             \
-    X(HTMLElementOffsetTop)                \
-    X(HTMLElementOffsetWidth)              \
-    X(HTMLElementScrollParent)             \
-    X(HTMLEventLoopRenderingUpdate)        \
-    X(HTMLImageElementHeight)              \
-    X(HTMLImageElementWidth)               \
-    X(HTMLInputElementHeight)              \
-    X(HTMLInputElementWidth)               \
-    X(InternalsHitTest)                    \
-    X(MediaQueryListMatches)               \
-    X(NodeNameOrDescription)               \
-    X(RangeGetClientRects)                 \
-    X(ResolvedCSSStyleDeclarationProperty) \
-    X(SVGDecodedImageDataRender)           \
-    X(SVGGraphicsElementGetBBox)           \
-    X(SourceSetNormalizeSourceDensities)   \
+#define ENUMERATE_UPDATE_LAYOUT_REASONS(X)    \
+    X(CanvasRenderingContext2DSetFilter)      \
+    X(CanvasRenderingContext2DSetFillStyle)   \
+    X(CanvasRenderingContext2DSetShadowColor) \
+    X(CanvasRenderingContext2DSetStrokeStyle) \
+    X(CanvasSetFillStyle)                     \
+    X(CursorBlinkTimer)                       \
+    X(ChildDocumentStyleUpdate)               \
+    X(Debugging)                              \
+    X(DocumentElementFromPoint)               \
+    X(DocumentElementsFromPoint)              \
+    X(DocumentFindMatchingText)               \
+    X(DocumentSetDesignMode)                  \
+    X(DumpDisplayList)                        \
+    X(ElementCheckVisibility)                 \
+    X(ElementClientHeight)                    \
+    X(ElementClientLeft)                      \
+    X(ElementClientTop)                       \
+    X(ElementClientWidth)                     \
+    X(ElementGetClientRects)                  \
+    X(ElementIsPotentiallyScrollable)         \
+    X(ElementScroll)                          \
+    X(ElementScrollHeight)                    \
+    X(ElementScrollIntoView)                  \
+    X(ElementScrollLeft)                      \
+    X(ElementScrollTop)                       \
+    X(ElementScrollWidth)                     \
+    X(ElementSetScrollLeft)                   \
+    X(ElementSetScrollTop)                    \
+    X(EventHandlerHandleDoubleClick)          \
+    X(EventHandlerHandleDragAndDrop)          \
+    X(EventHandlerHandleMouseDown)            \
+    X(EventHandlerHandleMouseMove)            \
+    X(EventHandlerHandleMouseUp)              \
+    X(EventHandlerHandleMouseWheel)           \
+    X(HTMLElementGetTheTextSteps)             \
+    X(HTMLElementOffsetHeight)                \
+    X(HTMLElementOffsetLeft)                  \
+    X(HTMLElementOffsetParent)                \
+    X(HTMLElementOffsetTop)                   \
+    X(HTMLElementOffsetWidth)                 \
+    X(HTMLElementScrollParent)                \
+    X(HTMLEventLoopRenderingUpdate)           \
+    X(HTMLImageElementHeight)                 \
+    X(HTMLImageElementWidth)                  \
+    X(HTMLInputElementHeight)                 \
+    X(HTMLInputElementWidth)                  \
+    X(InternalsHitTest)                       \
+    X(MediaQueryListMatches)                  \
+    X(NodeNameOrDescription)                  \
+    X(RangeGetClientRects)                    \
+    X(ResolvedCSSStyleDeclarationProperty)    \
+    X(SVGDecodedImageDataRender)              \
+    X(SVGGraphicsElementGetBBox)              \
+    X(SourceSetNormalizeSourceDensities)      \
     X(WindowScroll)
 
 enum class UpdateLayoutReason {
@@ -257,7 +263,7 @@ public:
     CSS::StyleSheetList& style_sheets();
     CSS::StyleSheetList const& style_sheets() const;
 
-    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&, GC::Ptr<DOM::ShadowRoot>)>&& callback) const;
+    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
 
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
 
@@ -472,8 +478,8 @@ public:
 
     void set_window(HTML::Window&);
 
-    WebIDL::ExceptionOr<void> write(Vector<String> const& strings);
-    WebIDL::ExceptionOr<void> writeln(Vector<String> const& strings);
+    WebIDL::ExceptionOr<void> write(Vector<TrustedTypes::TrustedHTMLOrString> const& text);
+    WebIDL::ExceptionOr<void> writeln(Vector<TrustedTypes::TrustedHTMLOrString> const& text);
 
     WebIDL::ExceptionOr<Document*> open(Optional<String> const& = {}, Optional<String> const& = {});
     WebIDL::ExceptionOr<GC::Ptr<HTML::WindowProxy>> open(StringView url, StringView name, StringView features);
@@ -534,6 +540,9 @@ public:
     bool anything_is_delaying_the_load_event() const;
     void increment_number_of_things_delaying_the_load_event(Badge<DocumentLoadEventDelayer>);
     void decrement_number_of_things_delaying_the_load_event(Badge<DocumentLoadEventDelayer>);
+
+    void add_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CSS::CSSImportRule>);
+    void remove_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CSS::CSSImportRule>);
 
     bool page_showing() const { return m_page_showing; }
     void set_page_showing(bool);
@@ -828,7 +837,7 @@ public:
     Vector<GC::Root<Range>> find_matching_text(String const&, CaseSensitivity);
 
     void parse_html_from_a_string(StringView);
-    static GC::Ref<Document> parse_html_unsafe(JS::VM&, StringView);
+    static WebIDL::ExceptionOr<GC::Root<DOM::Document>> parse_html_unsafe(JS::VM&, TrustedTypes::TrustedHTMLOrString const&);
 
     void set_console_client(GC::Ptr<JS::ConsoleClient> console_client) { m_console_client = console_client; }
     GC::Ptr<JS::ConsoleClient> console_client() const { return m_console_client; }
@@ -925,11 +934,6 @@ public:
     void add_render_blocking_element(GC::Ref<Element>);
     void remove_render_blocking_element(GC::Ref<Element>);
 
-    void schedule_ancestors_style_invalidation_due_to_presence_of_has(Node& node)
-    {
-        m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
-    }
-
     ElementByIdMap& element_by_id() const;
 
     auto& script_blocking_style_sheet_set() { return m_script_blocking_style_sheet_set; }
@@ -945,6 +949,9 @@ public:
     HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>>& registered_custom_properties();
 
     NonnullRefPtr<CSS::StyleValue const> custom_property_initial_value(FlyString const& name) const;
+
+    CSS::StyleScope const& style_scope() const { return m_style_scope; }
+    CSS::StyleScope& style_scope() { return m_style_scope; }
 
 protected:
     virtual void initialize(JS::Realm&) override;
@@ -972,7 +979,7 @@ private:
         Yes,
         No,
     };
-    WebIDL::ExceptionOr<void> run_the_document_write_steps(Vector<String> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink);
+    WebIDL::ExceptionOr<void> run_the_document_write_steps(Vector<TrustedTypes::TrustedHTMLOrString> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink);
 
     void queue_intersection_observer_task();
     void queue_an_intersection_observer_entry(IntersectionObserver::IntersectionObserver&, HighResolutionTime::DOMHighResTimeStamp time, GC::Ref<Geometry::DOMRectReadOnly> root_bounds, GC::Ref<Geometry::DOMRectReadOnly> bounding_client_rect, GC::Ref<Geometry::DOMRectReadOnly> intersection_rect, bool is_intersecting, double intersection_ratio, GC::Ref<Element> target);
@@ -1089,6 +1096,8 @@ private:
 
     // https://html.spec.whatwg.org/multipage/semantics.html#script-blocking-style-sheet-set
     HashTable<GC::Ref<DOM::Element>> m_script_blocking_style_sheet_set;
+
+    HashTable<GC::Ref<CSS::CSSImportRule>> m_pending_css_import_rules;
 
     GC::Ptr<HTML::History> m_history;
 
@@ -1336,12 +1345,12 @@ private:
     // https://drafts.csswg.org/css-view-transitions-1/#document-update-callback-queue
     Vector<GC::Ptr<ViewTransition::ViewTransition>> m_update_callback_queue = {};
 
-    HashTable<GC::Weak<Node>> m_pending_nodes_for_style_invalidation_due_to_presence_of_has;
-
     GC::Ref<StyleInvalidator> m_style_invalidator;
 
     // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
     HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>> m_registered_custom_properties;
+
+    CSS::StyleScope m_style_scope;
 };
 
 template<>

@@ -6,6 +6,7 @@
 
 #include <LibWeb/Bindings/HTMLOListElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/AttributeNames.h>
@@ -49,6 +50,11 @@ WebIDL::Long HTMLOListElement::start()
     if (auto maybe_number = HTML::parse_integer(content_attribute_value); maybe_number.has_value())
         return *maybe_number;
     return 1;
+}
+
+void HTMLOListElement::set_start(WebIDL::Long start)
+{
+    set_attribute_value(AttributeNames::start, String::number(start));
 }
 
 // https://html.spec.whatwg.org/multipage/grouping-content.html#concept-ol-start

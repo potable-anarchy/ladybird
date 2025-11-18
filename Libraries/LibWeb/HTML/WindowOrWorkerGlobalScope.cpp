@@ -214,11 +214,11 @@ static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> crop_to_the_source_rectangle_with_for
         // The "high" value indicates a preference for a high level of image interpolation quality. High-quality image interpolation may be more computationally expensive than lower settings.
     case Bindings::ResizeQuality::Medium:
         // The "medium" value indicates a preference for a medium level of image interpolation quality.
-        scaling_passes.append(ScalingPass { .mode = Gfx::ScalingMode::BoxSampling, .width = output_width, .height = output_height });
+        scaling_passes.append(ScalingPass { .mode = Gfx::ScalingMode::BilinearMipmap, .width = output_width, .height = output_height });
         break;
     case Bindings::ResizeQuality::Low:
         // The "low" value indicates a preference for a low level of image interpolation quality. Low-quality image interpolation may be more computationally efficient than higher settings.
-        scaling_passes.append(ScalingPass { .mode = Gfx::ScalingMode::BilinearBlend, .width = output_width, .height = output_height });
+        scaling_passes.append(ScalingPass { .mode = Gfx::ScalingMode::Bilinear, .width = output_width, .height = output_height });
         break;
     case Bindings::ResizeQuality::Pixelated: {
         // The "pixelated" value indicates a preference for scaling the image to preserve the pixelation of the original as much as possible, with minor smoothing as necessary to avoid distorting the image when the target size is not a clean multiple of the original.
@@ -237,7 +237,7 @@ static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> crop_to_the_source_rectangle_with_for
             scaling_passes.append(ScalingPass { .mode = Gfx::ScalingMode::NearestNeighbor, .width = source_width * width_multiple, .height = source_height * height_multiple });
 
         // then scale it the rest of the way to the target size using bilinear interpolation.
-        scaling_passes.append(ScalingPass { .mode = Gfx::ScalingMode::BilinearBlend, .width = output_width, .height = output_height });
+        scaling_passes.append(ScalingPass { .mode = Gfx::ScalingMode::Bilinear, .width = output_width, .height = output_height });
     } break;
     }
     for (ScalingPass& scaling_pass : scaling_passes) {
@@ -416,11 +416,25 @@ GC::Ref<WebIDL::Promise> WindowOrWorkerGlobalScopeMixin::create_image_bitmap_imp
                     }));
                 },
                 // -> ImageBitmap
-                [&](GC::Root<ImageBitmap> const&) {
-                    dbgln("(STUBBED) createImageBitmap() for ImageBitmap");
-                    auto const error = JS::Error::create(realm, "Not Implemented: createImageBitmap() for ImageBitmap"sv);
-                    TemporaryExecutionContext const context { relevant_realm(p->promise()), TemporaryExecutionContext::CallbacksEnabled::Yes };
-                    WebIDL::reject_promise(realm, *p, error);
+                [&](GC::Root<ImageBitmap> const& source_image_bitmap) {
+                    // 1. Set imageBitmap's bitmap data to a copy of image's bitmap data, cropped to the source rectangle with formatting.
+                    auto cropped_bitmap_or_error = crop_to_the_source_rectangle_with_formatting(source_image_bitmap->bitmap(), sx, sy, sw, sh, options);
+                    // AD-HOC: Reject promise with an "InvalidStateError" DOMException on allocation failure
+                    // Spec issue: https://github.com/whatwg/html/issues/3323
+                    if (cropped_bitmap_or_error.is_error()) {
+                        WebIDL::reject_promise(realm, *p, WebIDL::InvalidStateError::create(image_bitmap->realm(), "Image size is invalid"_utf16));
+                        return;
+                    }
+                    image_bitmap->set_bitmap(cropped_bitmap_or_error.release_value());
+
+                    // FIXME: 2. Set the origin-clean flag of imageBitmap's bitmap to the same value as the origin-clean flag of image's bitmap.
+
+                    // 3. Queue a global task, using the bitmap task source, to resolve promise with imageBitmap.
+                    queue_global_task(Task::Source::BitmapTask, image_bitmap, GC::create_function(realm.heap(), [p, image_bitmap] {
+                        auto& realm = relevant_realm(image_bitmap);
+                        TemporaryExecutionContext const context { realm, TemporaryExecutionContext::CallbacksEnabled::Yes };
+                        WebIDL::resolve_promise(realm, *p, image_bitmap);
+                    }));
                 },
                 [&](GC::Root<OffscreenCanvas> const&) {
                     dbgln("(STUBBED) createImageBitmap() for OffscreenCanvas");
@@ -543,7 +557,7 @@ i32 WindowOrWorkerGlobalScopeMixin::run_timer_initialization_steps(TimerHandler 
 
     auto& vm = this_impl().vm();
 
-    // FIXME 8. Let uniqueHandle be null.
+    // FIXME: 8. Let uniqueHandle be null.
 
     // 9. Let task be a task that runs the following substeps:
     auto task = GC::create_function(vm.heap(), Function<void()>([this, handler = move(handler), timeout, arguments = move(arguments), repeat, id, initiating_script, previous_id, &vm, &realm]() {

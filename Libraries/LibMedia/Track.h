@@ -10,7 +10,9 @@
 #include <AK/Time.h>
 #include <AK/Traits.h>
 #include <AK/Types.h>
+#include <AK/Utf16String.h>
 #include <AK/Variant.h>
+#include <LibMedia/Color/CodingIndependentCodePoints.h>
 
 namespace Media {
 
@@ -25,12 +27,15 @@ class Track {
     struct VideoData {
         u64 pixel_width { 0 };
         u64 pixel_height { 0 };
+        CodingIndependentCodePoints cicp;
     };
 
 public:
-    Track(TrackType type, size_t identifier)
+    Track(TrackType type, size_t identifier, Utf16String const& name, Utf16String const& language)
         : m_type(type)
         , m_identifier(identifier)
+        , m_name(name)
+        , m_language(language)
     {
         switch (m_type) {
         case TrackType::Video:
@@ -42,8 +47,10 @@ public:
         }
     }
 
-    TrackType type() { return m_type; }
+    TrackType type() const { return m_type; }
     size_t identifier() const { return m_identifier; }
+    Utf16String const& name() const { return m_name; }
+    Utf16String const& language() const { return m_language; }
 
     void set_video_data(VideoData data)
     {
@@ -70,6 +77,8 @@ public:
 private:
     TrackType m_type { 0 };
     size_t m_identifier { 0 };
+    Utf16String m_name;
+    Utf16String m_language;
 
     Variant<Empty, VideoData> m_track_data;
 };

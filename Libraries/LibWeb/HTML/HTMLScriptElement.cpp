@@ -20,6 +20,7 @@
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/HTML/Scripting/ImportMapParseResult.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Infra/Strings.h>
@@ -154,6 +155,8 @@ void HTMLScriptElement::execute_script()
     }
     // -> "importmap"
     else if (m_script_type == ScriptType::ImportMap) {
+        HTML::TemporaryExecutionContext execution_context { realm() };
+
         // 1. Register an import map given el's relevant global object and el's result.
         m_result.get<GC::Ref<ImportMapParseResult>>()->register_import_map(as<Window>(relevant_global_object(*this)));
     }
@@ -436,7 +439,7 @@ void HTMLScriptElement::prepare_script()
         // -> "classic"
         if (m_script_type == ScriptType::Classic) {
             // Fetch a classic script given url, settings object, options, classic script CORS setting, encoding, and onComplete.
-            fetch_classic_script(*this, *url, settings_object, move(options), classic_script_cors_setting, encoding.release_value(), on_complete).release_value_but_fixme_should_propagate_errors();
+            fetch_classic_script(*this, *url, settings_object, move(options), classic_script_cors_setting, encoding.release_value(), on_complete);
         }
         // -> "module"
         else if (m_script_type == ScriptType::Module) {
@@ -683,7 +686,7 @@ WebIDL::ExceptionOr<void> HTMLScriptElement::set_text(TrustedTypes::TrustedScrip
         TrustedTypes::TrustedTypeName::TrustedScript,
         HTML::relevant_global_object(*this),
         text,
-        TrustedTypes::InjectionSink::HTMLScriptElementtext,
+        TrustedTypes::InjectionSink::HTMLScriptElement_text,
         TrustedTypes::Script.to_string()));
 
     // 2. Set this’s script text value to the given value.
@@ -703,11 +706,11 @@ WebIDL::ExceptionOr<void> HTMLScriptElement::set_src(TrustedTypes::TrustedScript
         TrustedTypes::TrustedTypeName::TrustedScriptURL,
         HTML::relevant_global_object(*this),
         text,
-        TrustedTypes::InjectionSink::HTMLScriptElementsrc,
+        TrustedTypes::InjectionSink::HTMLScriptElement_src,
         TrustedTypes::Script.to_string()));
 
     // 2. Set this’s src content attribute to value.
-    TRY(set_attribute(AttributeNames::src, value));
+    set_attribute_value(AttributeNames::src, value.to_utf8_but_should_be_ported_to_utf16());
     return {};
 }
 
@@ -727,7 +730,7 @@ WebIDL::ExceptionOr<void> HTMLScriptElement::set_text_content(TrustedTypes::Trus
         TrustedTypes::TrustedTypeName::TrustedScript,
         HTML::relevant_global_object(*this),
         text,
-        TrustedTypes::InjectionSink::HTMLScriptElementtextContent,
+        TrustedTypes::InjectionSink::HTMLScriptElement_textContent,
         TrustedTypes::Script.to_string()));
 
     // 2. Set this’s script text value to value.
@@ -754,7 +757,7 @@ WebIDL::ExceptionOr<void> HTMLScriptElement::set_inner_text(TrustedTypes::Truste
         TrustedTypes::TrustedTypeName::TrustedScript,
         HTML::relevant_global_object(*this),
         text,
-        TrustedTypes::InjectionSink::HTMLScriptElementinnerText,
+        TrustedTypes::InjectionSink::HTMLScriptElement_innerText,
         TrustedTypes::Script.to_string()));
 
     // 2. Set this’s script text value to value.
@@ -787,7 +790,7 @@ void HTMLScriptElement::set_async(bool async)
 
     // 2. If the given value is true, then set this's async content attribute to the empty string.
     if (async) {
-        MUST(set_attribute(HTML::AttributeNames::async, ""_string));
+        set_attribute_value(HTML::AttributeNames::async, ""_string);
     }
     // 3. Otherwise, remove this's async content attribute.
     else {

@@ -34,7 +34,7 @@ public:
     static NonnullOwnPtr<EventLoopImplementationWindows> create() { return make<EventLoopImplementationWindows>(); }
 
     EventLoopImplementationWindows();
-    virtual ~EventLoopImplementationWindows() override = default;
+    virtual ~EventLoopImplementationWindows() override;
 
     virtual int exec() override;
     virtual size_t pump(PumpMode) override;

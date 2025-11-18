@@ -136,10 +136,10 @@ def main():
         sys.exit(1)
 
     if "target" in args:
-        if args.target == "ladybird":
+        if platform.host_system != HostSystem.Windows and args.target == "ladybird":
             args.target = "Ladybird"
         if not args.target and args.command not in ("build", "rebuild"):
-            args.target = "Ladybird"
+            args.target = "ladybird" if platform.host_system == HostSystem.Windows else "Ladybird"
 
     if args.command == "build":
         build_dir = configure_main(platform, args.preset, args.cc, args.cxx)
@@ -271,6 +271,7 @@ def configure_build_env(platform: Platform, preset: str) -> tuple[Path, Path]:
 
     known_presets = {
         "Debug": build_root_dir / "debug",
+        "All_Debug": build_root_dir / "alldebug",
         "Distribution": build_root_dir / "distribution",
         "Release": build_root_dir / "release",
         "Sanitizer": build_root_dir / "sanitizers",
@@ -399,6 +400,8 @@ def debug_main(host_system: HostSystem, build_dir: Path, target: str, debugger: 
 
     if target == "Ladybird" and host_system == HostSystem.macOS:
         gdb_args.append(str(build_dir.joinpath("bin", "Ladybird.app")))
+    elif host_system == HostSystem.Windows:
+        gdb_args.append(str(build_dir.joinpath("bin", target + ".exe")))
     else:
         gdb_args.append(str(build_dir.joinpath("bin", target)))
 

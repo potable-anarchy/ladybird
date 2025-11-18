@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibWeb/Bindings/ShadowRootPrototype.h>
+#include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/ElementByIdMap.h>
 #include <LibWeb/Export.h>
@@ -45,10 +46,10 @@ public:
     // ^EventTarget
     virtual EventTarget* get_parent(Event const&) override;
 
-    WebIDL::ExceptionOr<String> inner_html() const;
-    WebIDL::ExceptionOr<void> set_inner_html(StringView);
+    WebIDL::ExceptionOr<TrustedTypes::TrustedHTMLOrString> inner_html() const;
+    WebIDL::ExceptionOr<void> set_inner_html(TrustedTypes::TrustedHTMLOrString const&);
 
-    WebIDL::ExceptionOr<void> set_html_unsafe(StringView);
+    WebIDL::ExceptionOr<void> set_html_unsafe(TrustedTypes::TrustedHTMLOrString const&);
 
     WebIDL::ExceptionOr<String> get_html(GetHTMLOptions const&) const;
 
@@ -63,10 +64,14 @@ public:
     WebIDL::ExceptionOr<void> set_adopted_style_sheets(JS::Value);
 
     void for_each_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
+    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
 
     WebIDL::ExceptionOr<Vector<GC::Ref<Animations::Animation>>> get_animations();
 
     ElementByIdMap& element_by_id() const;
+
+    CSS::StyleScope const& style_scope() const { return m_style_scope; }
+    CSS::StyleScope& style_scope() { return m_style_scope; }
 
     virtual void finalize() override;
 
@@ -102,6 +107,8 @@ private:
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 
     IntrusiveListNode<ShadowRoot> m_list_node;
+
+    CSS::StyleScope m_style_scope;
 
 public:
     using DocumentShadowRootList = IntrusiveList<&ShadowRoot::m_list_node>;

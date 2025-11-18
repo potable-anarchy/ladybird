@@ -13,6 +13,8 @@
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/Layout/BlockContainer.h>
+#include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
+#include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
 
 namespace Web::DOM {
 
@@ -21,6 +23,7 @@ GC_DEFINE_ALLOCATOR(ShadowRoot);
 ShadowRoot::ShadowRoot(Document& document, Element& host, Bindings::ShadowRootMode mode)
     : DocumentFragment(document)
     , m_mode(mode)
+    , m_style_scope(*this)
 {
     document.register_shadow_root({}, *this);
     set_host(&host);
@@ -63,22 +66,29 @@ EventTarget* ShadowRoot::get_parent(Event const& event)
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-shadowroot-innerhtml
-WebIDL::ExceptionOr<String> ShadowRoot::inner_html() const
+WebIDL::ExceptionOr<TrustedTypes::TrustedHTMLOrString> ShadowRoot::inner_html() const
 {
-    return serialize_fragment(HTML::RequireWellFormed::Yes);
+    return TRY(serialize_fragment(HTML::RequireWellFormed::Yes));
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-shadowroot-innerhtml
-WebIDL::ExceptionOr<void> ShadowRoot::set_inner_html(StringView value)
+WebIDL::ExceptionOr<void> ShadowRoot::set_inner_html(TrustedTypes::TrustedHTMLOrString const& value)
 {
-    // FIXME: 1. Let compliantString be the result of invoking the Get Trusted Type compliant string algorithm with TrustedHTML, this's relevant global object, the given value, "ShadowRoot innerHTML", and "script".
+    // 1. Let compliantString be the result of invoking the Get Trusted Type compliant string algorithm with
+    //    TrustedHTML, this's relevant global object, the given value, "ShadowRoot innerHTML", and "script".
+    auto const compliant_string = TRY(TrustedTypes::get_trusted_type_compliant_string(
+        TrustedTypes::TrustedTypeName::TrustedHTML,
+        HTML::relevant_global_object(*this),
+        value,
+        TrustedTypes::InjectionSink::ShadowRoot_innerHTML,
+        TrustedTypes::Script.to_string()));
 
     // 2. Let context be this's host.
     auto context = this->host();
     VERIFY(context);
 
-    // 3. Let fragment be the result of invoking the fragment parsing algorithm steps with context and compliantString. FIXME: Use compliantString instead of markup.
-    auto fragment = TRY(context->parse_fragment(value));
+    // 3. Let fragment be the result of invoking the fragment parsing algorithm steps with context and compliantString.
+    auto fragment = TRY(context->parse_fragment(compliant_string.to_utf8_but_should_be_ported_to_utf16()));
 
     // 4. Replace all with fragment within this.
     this->replace_all(fragment);
@@ -110,12 +120,19 @@ WebIDL::ExceptionOr<String> ShadowRoot::get_html(GetHTMLOptions const& options) 
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-shadowroot-sethtmlunsafe
-WebIDL::ExceptionOr<void> ShadowRoot::set_html_unsafe(StringView html)
+WebIDL::ExceptionOr<void> ShadowRoot::set_html_unsafe(TrustedTypes::TrustedHTMLOrString const& html)
 {
-    // FIXME: 1. Let compliantHTML be the result of invoking the Get Trusted Type compliant string algorithm with TrustedHTML, this's relevant global object, html, "ShadowRoot setHTMLUnsafe", and "script".
+    // 1. Let compliantHTML be the result of invoking the Get Trusted Type compliant string algorithm with
+    //    TrustedHTML, this's relevant global object, html, "ShadowRoot setHTMLUnsafe", and "script".
+    auto const compliant_html = TRY(TrustedTypes::get_trusted_type_compliant_string(
+        TrustedTypes::TrustedTypeName::TrustedHTML,
+        HTML::relevant_global_object(*this),
+        html,
+        TrustedTypes::InjectionSink::ShadowRoot_setHTMLUnsafe,
+        TrustedTypes::Script.to_string()));
 
-    // 3. Unsafe set HTML given this, this's shadow host, and compliantHTML. FIXME: Use compliantHTML.
-    TRY(unsafely_set_html(*this->host(), html));
+    // 2. Unsafely set HTML given this, this's shadow host, and compliantHTML.
+    TRY(unsafely_set_html(*this->host(), compliant_html.to_utf8_but_should_be_ported_to_utf16()));
 
     return {};
 }
@@ -140,6 +157,7 @@ CSS::StyleSheetList const& ShadowRoot::style_sheets() const
 void ShadowRoot::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
+    m_style_scope.visit_edges(visitor);
     visitor.visit(m_style_sheets);
     visitor.visit(m_adopted_style_sheets);
 }
@@ -180,14 +198,24 @@ void ShadowRoot::for_each_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& 
     }
 }
 
+void ShadowRoot::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const
+{
+    for (auto& style_sheet : style_sheets().sheets()) {
+        if (!style_sheet->disabled())
+            callback(*style_sheet);
+    }
+
+    if (m_adopted_style_sheets) {
+        m_adopted_style_sheets->for_each<CSS::CSSStyleSheet>([&](auto& style_sheet) {
+            if (!style_sheet.disabled())
+                callback(style_sheet);
+        });
+    }
+}
+
 WebIDL::ExceptionOr<Vector<GC::Ref<Animations::Animation>>> ShadowRoot::get_animations()
 {
-    Vector<GC::Ref<Animations::Animation>> relevant_animations;
-    TRY(for_each_child_of_type_fallible<Element>([&](auto& child) -> WebIDL::ExceptionOr<IterationDecision> {
-        relevant_animations.extend(TRY(child.get_animations(Animations::GetAnimationsOptions { .subtree = true })));
-        return IterationDecision::Continue;
-    }));
-    return relevant_animations;
+    return calculate_get_animations(*this);
 }
 
 ElementByIdMap& ShadowRoot::element_by_id() const

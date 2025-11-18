@@ -58,9 +58,7 @@ describe("errors", () => {
         );
 
         expect(() => {
-            formatter.format(
-                new Temporal.PlainDateTime(1972, 1, 1, 8, 45, 56, 123, 345, 789, "gregory")
-            );
+            formatter.format(new Temporal.PlainDateTime(1972, 1, 1, 8, 45, 56, 123, 345, 789, "gregory"));
         }).toThrowWithMessage(
             RangeError,
             "Cannot format Temporal.PlainDateTime with calendar 'gregory' in locale with calendar 'iso8601'"
@@ -673,5 +671,12 @@ describe("Temporal objects", () => {
     test("Temporal.Instant", () => {
         const instant = new Temporal.Instant(1732740069000000000n);
         expect(formatter.format(instant)).toBe("2024-11-27, 8:41:09 PM");
+    });
+
+    test("Formatting with only an era format option", () => {
+        const formatter = new Intl.DateTimeFormat("en", { era: "narrow", timeZone: "UTC" });
+
+        const plainDate = new Temporal.PlainDate(1989, 1, 23);
+        expect(formatter.format(plainDate)).toBe("1/23/1989 A");
     });
 });

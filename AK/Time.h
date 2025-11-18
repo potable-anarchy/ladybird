@@ -14,6 +14,7 @@
 #include <AK/String.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
+#include <math.h>
 
 #ifdef AK_OS_WINDOWS
 #    include <time.h>
@@ -213,6 +214,19 @@ private:
 
 public:
     [[nodiscard]] constexpr static Duration from_seconds(i64 seconds) { return Duration(seconds, 0); }
+    [[nodiscard]] constexpr static Duration from_seconds_f64(f64 seconds)
+    {
+        VERIFY(!isnan(seconds));
+        if (seconds >= static_cast<f64>(NumericLimits<i64>::max()))
+            return from_seconds(NumericLimits<i64>::max());
+        if (seconds <= static_cast<f64>(NumericLimits<i64>::min()))
+            return from_seconds(NumericLimits<i64>::min());
+        i64 integer_seconds = static_cast<i64>(seconds);
+        if (static_cast<f64>(integer_seconds) > seconds)
+            integer_seconds--;
+        u32 integer_nanoseconds = static_cast<u32>((seconds - static_cast<f64>(integer_seconds)) * 1'000'000'000);
+        return Duration(integer_seconds, integer_nanoseconds);
+    }
     [[nodiscard]] constexpr static Duration from_nanoseconds(i64 nanoseconds)
     {
         i64 seconds = sane_mod(nanoseconds, 1'000'000'000);
@@ -231,6 +245,7 @@ public:
     [[nodiscard]] static Duration from_ticks(clock_t, time_t);
     [[nodiscard]] static Duration from_timespec(const struct timespec&);
     [[nodiscard]] static Duration from_timeval(const struct timeval&);
+    [[nodiscard]] static Duration from_time_units(i64 units, u32 numerator, u32 denominator);
     // We don't pull in <stdint.h> for the pretty min/max definitions because this file is also included in the Kernel
     [[nodiscard]] constexpr static Duration min() { return Duration(-__INT64_MAX__ - 1LL, 0); }
     [[nodiscard]] constexpr static Duration zero() { return Duration(0, 0); }
@@ -249,6 +264,7 @@ public:
     [[nodiscard]] timespec to_timespec() const;
     // Rounds towards -inf (it was the easiest to implement).
     [[nodiscard]] timeval to_timeval() const;
+    [[nodiscard]] i64 to_time_units(u32 numerator, u32 denominator) const;
 
     [[nodiscard]] bool is_zero() const { return (m_seconds == 0) && (m_nanoseconds == 0); }
     [[nodiscard]] bool is_negative() const { return m_seconds < 0; }
@@ -339,6 +355,8 @@ public:
     }
 
 private:
+    friend struct Formatter<Duration>;
+
     constexpr explicit Duration(i64 seconds, u32 nanoseconds)
         : m_seconds(seconds)
         , m_nanoseconds(nanoseconds)
@@ -349,6 +367,11 @@ private:
 
     i64 m_seconds { 0 };
     u32 m_nanoseconds { 0 }; // Always less than 1'000'000'000
+};
+
+template<>
+struct Formatter<Duration> : StandardFormatter {
+    ErrorOr<void> format(FormatBuilder&, Duration);
 };
 
 namespace Detail {

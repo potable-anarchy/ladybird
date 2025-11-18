@@ -573,7 +573,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
         // 2. If body is a Document, then set this’s request body to body, serialized, converted, and UTF-8 encoded.
         if (body->has<GC::Root<DOM::Document>>()) {
             auto string_serialized_document = TRY(body->get<GC::Root<DOM::Document>>().cell()->serialize_fragment(HTML::RequireWellFormed::No));
-            m_request_body = Fetch::Infrastructure::byte_sequence_as_body(realm, string_serialized_document.bytes());
+            m_request_body = Fetch::Infrastructure::byte_sequence_as_body(realm, string_serialized_document.to_utf8().bytes());
         }
         // 3. Otherwise:
         else {
@@ -849,7 +849,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
         };
 
         // 10. Set this’s fetch controller to the result of fetching req with processRequestBodyChunkLength set to processRequestBodyChunkLength, processRequestEndOfBody set to processRequestEndOfBody, and processResponse set to processResponse.
-        m_fetch_controller = TRY(Fetch::Fetching::fetch(
+        m_fetch_controller = Fetch::Fetching::fetch(
             realm,
             request,
             Fetch::Infrastructure::FetchAlgorithms::create(vm,
@@ -860,7 +860,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
                     .process_response = move(process_response),
                     .process_response_end_of_body = {},
                     .process_response_consume_body = {},
-                })));
+                }));
 
         // 11. Let now be the present time.
         // 12. Run these steps in parallel:
@@ -905,7 +905,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
         };
 
         // 3. Set this’s fetch controller to the result of fetching req with processResponseConsumeBody set to processResponseConsumeBody and useParallelQueue set to true.
-        m_fetch_controller = TRY(Fetch::Fetching::fetch(
+        m_fetch_controller = Fetch::Fetching::fetch(
             realm,
             request,
             Fetch::Infrastructure::FetchAlgorithms::create(vm,
@@ -917,7 +917,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
                     .process_response_end_of_body = {},
                     .process_response_consume_body = move(process_response_consume_body),
                 }),
-            Fetch::Fetching::UseParallelQueue::Yes));
+            Fetch::Fetching::UseParallelQueue::Yes);
 
         // 4. Let now be the present time.
         // 5. Pause until either processedResponse is true or this’s timeout is not 0 and this’s timeout milliseconds have passed since now.

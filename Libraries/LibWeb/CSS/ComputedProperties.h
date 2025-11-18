@@ -16,6 +16,7 @@
 #include <LibGfx/Forward.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/EasingFunction.h>
 #include <LibWeb/CSS/LengthBox.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/PseudoClass.h>
@@ -59,6 +60,7 @@ public:
     void set_animated_property_inherited(PropertyID, Inherited);
 
     void set_property(PropertyID, NonnullRefPtr<StyleValue const> value, Inherited = Inherited::No, Important = Important::No);
+    void set_property_without_modifying_flags(PropertyID, NonnullRefPtr<StyleValue const> value);
     void set_animated_property(PropertyID, NonnullRefPtr<StyleValue const> value, Inherited = Inherited::No);
     void remove_animated_property(PropertyID);
     enum class WithAnimationsApplied {
@@ -67,9 +69,6 @@ public:
     };
     StyleValue const& property(PropertyID, WithAnimationsApplied = WithAnimationsApplied::Yes) const;
     void revert_property(PropertyID, ComputedProperties const& style_for_revert);
-
-    GC::Ptr<CSSStyleDeclaration const> animation_name_source() const { return m_animation_name_source; }
-    void set_animation_name_source(GC::Ptr<CSSStyleDeclaration const> declaration) { m_animation_name_source = declaration; }
 
     GC::Ptr<CSSStyleDeclaration const> transition_property_source() const { return m_transition_property_source; }
     void set_transition_property_source(GC::Ptr<CSSStyleDeclaration const> declaration) { m_transition_property_source = declaration; }
@@ -110,7 +109,7 @@ public:
     ContentDataAndQuoteNestingLevel content(DOM::AbstractElement&, u32 initial_quote_nesting_level) const;
     ContentVisibility content_visibility() const;
     Vector<CursorData> cursor() const;
-    Variant<LengthOrCalculated, NumberOrCalculated> tab_size() const;
+    Variant<Length, double> tab_size() const;
     WhiteSpaceCollapse white_space_collapse() const;
     WhiteSpaceTrimData white_space_trim() const;
     WordBreak word_break() const;
@@ -151,6 +150,7 @@ public:
     BoxSizing box_sizing() const;
     PointerEvents pointer_events() const;
     Variant<VerticalAlign, LengthPercentage> vertical_align() const;
+    Gfx::ShapeFeatures font_features() const;
     Optional<Gfx::FontVariantAlternates> font_variant_alternates() const;
     FontVariantCaps font_variant_caps() const;
     Optional<Gfx::FontVariantEastAsian> font_variant_east_asian() const;
@@ -160,7 +160,7 @@ public:
     FontVariantPosition font_variant_position() const;
     FontKerning font_kerning() const;
     Optional<FlyString> font_language_override() const;
-    Optional<HashMap<FlyString, IntegerOrCalculated>> font_feature_settings() const;
+    HashMap<StringView, u8> font_feature_settings() const;
     Optional<HashMap<FlyString, NumberOrCalculated>> font_variation_settings() const;
     GridTrackSizeList grid_auto_columns() const;
     GridTrackSizeList grid_auto_rows() const;
@@ -187,6 +187,18 @@ public:
     ContainerType container_type() const;
     MixBlendMode mix_blend_mode() const;
     Optional<FlyString> view_transition_name() const;
+    struct AnimationProperties {
+        Variant<double, String> duration;
+        EasingFunction timing_function;
+        double iteration_count;
+        AnimationDirection direction;
+        AnimationPlayState play_state;
+        double delay;
+        AnimationFillMode fill_mode;
+        AnimationComposition composition;
+        FlyString name;
+    };
+    Vector<AnimationProperties> animations() const;
 
     Display display_before_box_type_transformation() const;
     void set_display_before_box_type_transformation(Display value);
@@ -195,16 +207,18 @@ public:
     Vector<Transformation> transformations() const;
     TransformBox transform_box() const;
     TransformOrigin transform_origin() const;
+    TransformStyle transform_style() const;
     Optional<Transformation> rotate() const;
     Optional<Transformation> translate() const;
     Optional<Transformation> scale() const;
+    Optional<CSSPixels> perspective() const;
 
     MaskType mask_type() const;
     float stop_opacity() const;
     float fill_opacity() const;
     StrokeLinecap stroke_linecap() const;
     StrokeLinejoin stroke_linejoin() const;
-    NumberOrCalculated stroke_miterlimit() const;
+    double stroke_miterlimit() const;
     float stroke_opacity() const;
     FillRule fill_rule() const;
     ClipRule clip_rule() const;
@@ -274,7 +288,6 @@ private:
     Overflow overflow(PropertyID) const;
     Vector<ShadowData> shadow(PropertyID, Layout::Node const&) const;
 
-    GC::Ptr<CSSStyleDeclaration const> m_animation_name_source;
     GC::Ptr<CSSStyleDeclaration const> m_transition_property_source;
 
     Array<RefPtr<StyleValue const>, number_of_longhand_properties> m_property_values;

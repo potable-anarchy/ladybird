@@ -502,27 +502,32 @@ void Page::unregister_media_element(Badge<HTML::HTMLMediaElement>, UniqueNodeID 
     });
 }
 
+void Page::update_all_media_element_video_sinks()
+{
+    for_each_media_element([](auto& media_element) {
+        media_element.update_video_frame_and_timeline();
+    });
+}
+
 void Page::did_request_media_context_menu(UniqueNodeID media_id, CSSPixelPoint position, ByteString const& target, unsigned modifiers, MediaContextMenu const& menu)
 {
     m_media_context_menu_element_id = media_id;
     client().page_did_request_media_context_menu(position, target, modifiers, menu);
 }
 
-WebIDL::ExceptionOr<void> Page::toggle_media_play_state()
+void Page::toggle_media_play_state()
 {
     auto media_element = media_context_menu_element();
     if (!media_element)
-        return {};
+        return;
 
     // AD-HOC: An execution context is required for Promise creation hooks.
     HTML::TemporaryExecutionContext execution_context { media_element->realm() };
 
     if (media_element->potentially_playing())
-        TRY(media_element->pause());
+        media_element->pause();
     else
-        TRY(media_element->play());
-
-    return {};
+        media_element->play();
 }
 
 void Page::toggle_media_mute_state()
@@ -537,11 +542,11 @@ void Page::toggle_media_mute_state()
     media_element->set_muted(!media_element->muted());
 }
 
-WebIDL::ExceptionOr<void> Page::toggle_media_loop_state()
+void Page::toggle_media_loop_state()
 {
     auto media_element = media_context_menu_element();
     if (!media_element)
-        return {};
+        return;
 
     // AD-HOC: An execution context is required for Promise creation hooks.
     HTML::TemporaryExecutionContext execution_context { media_element->realm() };
@@ -549,37 +554,30 @@ WebIDL::ExceptionOr<void> Page::toggle_media_loop_state()
     if (media_element->has_attribute(HTML::AttributeNames::loop))
         media_element->remove_attribute(HTML::AttributeNames::loop);
     else
-        TRY(media_element->set_attribute(HTML::AttributeNames::loop, String {}));
-
-    return {};
+        media_element->set_attribute_value(HTML::AttributeNames::loop, String {});
 }
 
-WebIDL::ExceptionOr<void> Page::toggle_media_controls_state()
+void Page::toggle_media_controls_state()
 {
     auto media_element = media_context_menu_element();
     if (!media_element)
-        return {};
+        return;
 
     HTML::TemporaryExecutionContext execution_context { media_element->realm() };
 
     if (media_element->has_attribute(HTML::AttributeNames::controls))
         media_element->remove_attribute(HTML::AttributeNames::controls);
     else
-        TRY(media_element->set_attribute(HTML::AttributeNames::controls, String {}));
-
-    return {};
+        media_element->set_attribute_value(HTML::AttributeNames::controls, String {});
 }
 
 void Page::toggle_page_mute_state()
 {
     m_mute_state = HTML::invert_mute_state(m_mute_state);
 
-    for (auto media_id : m_media_elements) {
-        if (auto* node = DOM::Node::from_unique_id(media_id)) {
-            auto& media_element = as<HTML::HTMLMediaElement>(*node);
-            media_element.page_mute_state_changed({});
-        }
-    }
+    for_each_media_element([&](auto& media_element) {
+        media_element.page_mute_state_changed({});
+    });
 }
 
 GC::Ptr<HTML::HTMLMediaElement> Page::media_context_menu_element()
@@ -601,7 +599,11 @@ void Page::set_user_style(String source)
 {
     m_user_style_sheet_source = source;
     if (top_level_traversable_is_initialized() && top_level_traversable()->active_document()) {
-        top_level_traversable()->active_document()->style_computer().invalidate_rule_cache();
+        auto& document = *top_level_traversable()->active_document();
+        document.style_scope().invalidate_rule_cache();
+        document.for_each_shadow_root([](auto& shadow_root) {
+            shadow_root.style_scope().invalidate_rule_cache();
+        });
     }
 }
 

@@ -484,10 +484,12 @@ private:
 
 class IteratorToArray final : public Instruction {
 public:
-    explicit IteratorToArray(Operand dst, Operand iterator)
+    explicit IteratorToArray(Operand dst, Operand iterator_object, Operand iterator_next_method, Operand iterator_done_property)
         : Instruction(Type::IteratorToArray)
         , m_dst(dst)
-        , m_iterator(iterator)
+        , m_iterator_object(iterator_object)
+        , m_iterator_next_method(iterator_next_method)
+        , m_iterator_done_property(iterator_done_property)
     {
     }
 
@@ -495,17 +497,20 @@ public:
     ByteString to_byte_string_impl(Bytecode::Executable const&) const;
 
     Operand dst() const { return m_dst; }
-    Operand iterator() const { return m_iterator; }
 
     void visit_operands_impl(Function<void(Operand&)> visitor)
     {
         visitor(m_dst);
-        visitor(m_iterator);
+        visitor(m_iterator_object);
+        visitor(m_iterator_next_method);
+        visitor(m_iterator_done_property);
     }
 
 private:
     Operand m_dst;
-    Operand m_iterator;
+    Operand m_iterator_object;
+    Operand m_iterator_next_method;
+    Operand m_iterator_done_property;
 };
 
 class ConcatString final : public Instruction {
@@ -546,8 +551,9 @@ enum class BindingInitializationMode {
 
 class CreateLexicalEnvironment final : public Instruction {
 public:
-    explicit CreateLexicalEnvironment(u32 capacity = 0)
+    explicit CreateLexicalEnvironment(Optional<Operand> dst = {}, u32 capacity = 0)
         : Instruction(Type::CreateLexicalEnvironment)
+        , m_dst(dst)
         , m_capacity(capacity)
     {
     }
@@ -556,6 +562,7 @@ public:
     ByteString to_byte_string_impl(Bytecode::Executable const&) const;
 
 private:
+    Optional<Operand> m_dst;
     u32 m_capacity { 0 };
 };
 
@@ -678,6 +685,44 @@ private:
     bool m_is_immutable : 4 { false };
     bool m_is_global : 4 { false };
     bool m_is_strict { false };
+};
+
+class CreateImmutableBinding final : public Instruction {
+public:
+    CreateImmutableBinding(Operand environment, IdentifierTableIndex identifier, bool strict)
+        : Instruction(Type::CreateImmutableBinding)
+        , m_environment(environment)
+        , m_identifier(identifier)
+        , m_strict(strict)
+    {
+    }
+
+    ThrowCompletionOr<void> execute_impl(Bytecode::Interpreter&) const;
+    ByteString to_byte_string_impl(Bytecode::Executable const&) const;
+
+private:
+    Operand m_environment;
+    IdentifierTableIndex m_identifier;
+    bool m_strict { false };
+};
+
+class CreateMutableBinding final : public Instruction {
+public:
+    CreateMutableBinding(Operand environment, IdentifierTableIndex identifier, bool can_be_deleted)
+        : Instruction(Type::CreateMutableBinding)
+        , m_environment(environment)
+        , m_identifier(identifier)
+        , m_can_be_deleted(can_be_deleted)
+    {
+    }
+
+    ThrowCompletionOr<void> execute_impl(Bytecode::Interpreter&) const;
+    ByteString to_byte_string_impl(Bytecode::Executable const&) const;
+
+private:
+    Operand m_environment;
+    IdentifierTableIndex m_identifier;
+    bool m_can_be_deleted { false };
 };
 
 class InitializeLexicalBinding final : public Instruction {
@@ -1879,6 +1924,7 @@ public:
 
     Call(Operand dst, Operand callee, Operand this_value, ReadonlySpan<ScopedOperand> arguments, Optional<StringTableIndex> expression_string = {})
         : Instruction(Type::Call)
+        , m_length(round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * arguments.size()))
         , m_dst(dst)
         , m_callee(callee)
         , m_this_value(this_value)
@@ -1890,10 +1936,7 @@ public:
     }
 
     size_t length() const { return length_impl(); }
-    size_t length_impl() const
-    {
-        return round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * m_argument_count);
-    }
+    size_t length_impl() const { return m_length; }
 
     Operand dst() const { return m_dst; }
     Operand callee() const { return m_callee; }
@@ -1914,6 +1957,7 @@ public:
     }
 
 private:
+    u32 m_length { 0 };
     Operand m_dst;
     Operand m_callee;
     Operand m_this_value;
@@ -1928,6 +1972,7 @@ public:
 
     CallBuiltin(Operand dst, Operand callee, Operand this_value, ReadonlySpan<ScopedOperand> arguments, Builtin builtin, Optional<StringTableIndex> expression_string = {})
         : Instruction(Type::CallBuiltin)
+        , m_length(round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * arguments.size()))
         , m_dst(dst)
         , m_callee(callee)
         , m_this_value(this_value)
@@ -1940,10 +1985,7 @@ public:
     }
 
     size_t length() const { return length_impl(); }
-    size_t length_impl() const
-    {
-        return round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * m_argument_count);
-    }
+    size_t length_impl() const { return m_length; }
 
     Operand dst() const { return m_dst; }
     Operand callee() const { return m_callee; }
@@ -1966,6 +2008,7 @@ public:
     }
 
 private:
+    u32 m_length { 0 };
     Operand m_dst;
     Operand m_callee;
     Operand m_this_value;
@@ -1981,6 +2024,7 @@ public:
 
     CallConstruct(Operand dst, Operand callee, ReadonlySpan<ScopedOperand> arguments, Optional<StringTableIndex> expression_string = {})
         : Instruction(Type::CallConstruct)
+        , m_length(round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * arguments.size()))
         , m_dst(dst)
         , m_callee(callee)
         , m_argument_count(arguments.size())
@@ -1991,10 +2035,7 @@ public:
     }
 
     size_t length() const { return length_impl(); }
-    size_t length_impl() const
-    {
-        return round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * m_argument_count);
-    }
+    size_t length_impl() const { return m_length; }
 
     Operand dst() const { return m_dst; }
     Operand callee() const { return m_callee; }
@@ -2013,6 +2054,7 @@ public:
     }
 
 private:
+    u32 m_length { 0 };
     Operand m_dst;
     Operand m_callee;
     u32 m_argument_count { 0 };
@@ -2026,6 +2068,7 @@ public:
 
     CallDirectEval(Operand dst, Operand callee, Operand this_value, ReadonlySpan<ScopedOperand> arguments, Optional<StringTableIndex> expression_string = {})
         : Instruction(Type::CallDirectEval)
+        , m_length(round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * arguments.size()))
         , m_dst(dst)
         , m_callee(callee)
         , m_this_value(this_value)
@@ -2037,10 +2080,7 @@ public:
     }
 
     size_t length() const { return length_impl(); }
-    size_t length_impl() const
-    {
-        return round_up_to_power_of_two(alignof(void*), sizeof(*this) + sizeof(Operand) * m_argument_count);
-    }
+    size_t length_impl() const { return m_length; }
 
     Operand dst() const { return m_dst; }
     Operand callee() const { return m_callee; }
@@ -2061,6 +2101,7 @@ public:
     }
 
 private:
+    u32 m_length { 0 };
     Operand m_dst;
     Operand m_callee;
     Operand m_this_value;
@@ -2246,23 +2287,6 @@ private:
     FunctionNode const& m_function_node;
     Optional<IdentifierTableIndex> m_lhs_name;
     Optional<Operand> m_home_object;
-};
-
-class BlockDeclarationInstantiation final : public Instruction {
-public:
-    explicit BlockDeclarationInstantiation(ScopeNode const& scope_node)
-        : Instruction(Type::BlockDeclarationInstantiation)
-        , m_scope_node(scope_node)
-    {
-    }
-
-    void execute_impl(Bytecode::Interpreter&) const;
-    ByteString to_byte_string_impl(Bytecode::Executable const&) const;
-
-    ScopeNode const& scope_node() const { return m_scope_node; }
-
-private:
-    ScopeNode const& m_scope_node;
 };
 
 class Return final : public Instruction {
@@ -2661,9 +2685,11 @@ private:
 
 class GetIterator final : public Instruction {
 public:
-    GetIterator(Operand dst, Operand iterable, IteratorHint hint = IteratorHint::Sync)
+    GetIterator(Operand dst_iterator_object, Operand dst_iterator_next_method, Operand dst_iterator_done_property, Operand iterable, IteratorHint hint = IteratorHint::Sync)
         : Instruction(Type::GetIterator)
-        , m_dst(dst)
+        , m_dst_iterator_object(dst_iterator_object)
+        , m_dst_iterator_next(dst_iterator_next_method)
+        , m_dst_iterator_done(dst_iterator_done_property)
         , m_iterable(iterable)
         , m_hint(hint)
     {
@@ -2673,68 +2699,21 @@ public:
     ByteString to_byte_string_impl(Bytecode::Executable const&) const;
     void visit_operands_impl(Function<void(Operand&)> visitor)
     {
-        visitor(m_dst);
+        visitor(m_dst_iterator_object);
+        visitor(m_dst_iterator_next);
+        visitor(m_dst_iterator_done);
         visitor(m_iterable);
     }
 
-    Operand dst() const { return m_dst; }
     Operand iterable() const { return m_iterable; }
     IteratorHint hint() const { return m_hint; }
 
 private:
-    Operand m_dst;
+    Operand m_dst_iterator_object;
+    Operand m_dst_iterator_next;
+    Operand m_dst_iterator_done;
     Operand m_iterable;
     IteratorHint m_hint { IteratorHint::Sync };
-};
-
-class GetObjectFromIteratorRecord final : public Instruction {
-public:
-    GetObjectFromIteratorRecord(Operand object, Operand iterator_record)
-        : Instruction(Type::GetObjectFromIteratorRecord)
-        , m_object(object)
-        , m_iterator_record(iterator_record)
-    {
-    }
-
-    void execute_impl(Bytecode::Interpreter&) const;
-    ByteString to_byte_string_impl(Bytecode::Executable const&) const;
-    void visit_operands_impl(Function<void(Operand&)> visitor)
-    {
-        visitor(m_object);
-        visitor(m_iterator_record);
-    }
-
-    Operand object() const { return m_object; }
-    Operand iterator_record() const { return m_iterator_record; }
-
-private:
-    Operand m_object;
-    Operand m_iterator_record;
-};
-
-class GetNextMethodFromIteratorRecord final : public Instruction {
-public:
-    GetNextMethodFromIteratorRecord(Operand next_method, Operand iterator_record)
-        : Instruction(Type::GetNextMethodFromIteratorRecord)
-        , m_next_method(next_method)
-        , m_iterator_record(iterator_record)
-    {
-    }
-
-    void execute_impl(Bytecode::Interpreter&) const;
-    ByteString to_byte_string_impl(Bytecode::Executable const&) const;
-    void visit_operands_impl(Function<void(Operand&)> visitor)
-    {
-        visitor(m_next_method);
-        visitor(m_iterator_record);
-    }
-
-    Operand next_method() const { return m_next_method; }
-    Operand iterator_record() const { return m_iterator_record; }
-
-private:
-    Operand m_next_method;
-    Operand m_iterator_record;
 };
 
 class GetMethod final : public Instruction {
@@ -2767,9 +2746,11 @@ private:
 
 class GetObjectPropertyIterator final : public Instruction {
 public:
-    GetObjectPropertyIterator(Operand dst, Operand object)
+    GetObjectPropertyIterator(Operand dst_iterator_object, Operand dst_iterator_next, Operand dst_iterator_done, Operand object)
         : Instruction(Type::GetObjectPropertyIterator)
-        , m_dst(dst)
+        , m_dst_iterator_object(dst_iterator_object)
+        , m_dst_iterator_next(dst_iterator_next)
+        , m_dst_iterator_done(dst_iterator_done)
         , m_object(object)
     {
     }
@@ -2778,23 +2759,26 @@ public:
     ByteString to_byte_string_impl(Bytecode::Executable const&) const;
     void visit_operands_impl(Function<void(Operand&)> visitor)
     {
-        visitor(m_dst);
+        visitor(m_dst_iterator_object);
+        visitor(m_dst_iterator_next);
+        visitor(m_dst_iterator_done);
         visitor(m_object);
     }
 
-    Operand dst() const { return m_dst; }
-    Operand object() const { return m_object; }
-
 private:
-    Operand m_dst;
+    Operand m_dst_iterator_object;
+    Operand m_dst_iterator_next;
+    Operand m_dst_iterator_done;
     Operand m_object;
 };
 
 class IteratorClose final : public Instruction {
 public:
-    IteratorClose(Operand iterator_record, Completion::Type completion_type, Optional<Value> completion_value)
+    IteratorClose(Operand iterator_object, Operand iterator_next, Operand iterator_done, Completion::Type completion_type, Optional<Value> completion_value)
         : Instruction(Type::IteratorClose)
-        , m_iterator_record(iterator_record)
+        , m_iterator_object(iterator_object)
+        , m_iterator_next(iterator_next)
+        , m_iterator_done(iterator_done)
         , m_completion_type(completion_type)
         , m_completion_value(completion_value)
     {
@@ -2804,24 +2788,29 @@ public:
     ByteString to_byte_string_impl(Bytecode::Executable const&) const;
     void visit_operands_impl(Function<void(Operand&)> visitor)
     {
-        visitor(m_iterator_record);
+        visitor(m_iterator_object);
+        visitor(m_iterator_next);
+        visitor(m_iterator_done);
     }
 
-    Operand iterator_record() const { return m_iterator_record; }
     Completion::Type completion_type() const { return m_completion_type; }
     Optional<Value> const& completion_value() const { return m_completion_value; }
 
 private:
-    Operand m_iterator_record;
+    Operand m_iterator_object;
+    Operand m_iterator_next;
+    Operand m_iterator_done;
     Completion::Type m_completion_type { Completion::Type::Normal };
     Optional<Value> m_completion_value;
 };
 
 class AsyncIteratorClose final : public Instruction {
 public:
-    AsyncIteratorClose(Operand iterator_record, Completion::Type completion_type, Optional<Value> completion_value)
+    AsyncIteratorClose(Operand iterator_object, Operand iterator_next, Operand iterator_done, Completion::Type completion_type, Optional<Value> completion_value)
         : Instruction(Type::AsyncIteratorClose)
-        , m_iterator_record(iterator_record)
+        , m_iterator_object(iterator_object)
+        , m_iterator_next(iterator_next)
+        , m_iterator_done(iterator_done)
         , m_completion_type(completion_type)
         , m_completion_value(completion_value)
     {
@@ -2831,25 +2820,30 @@ public:
     ByteString to_byte_string_impl(Bytecode::Executable const&) const;
     void visit_operands_impl(Function<void(Operand&)> visitor)
     {
-        visitor(m_iterator_record);
+        visitor(m_iterator_object);
+        visitor(m_iterator_next);
+        visitor(m_iterator_done);
     }
 
-    Operand iterator_record() const { return m_iterator_record; }
     Completion::Type completion_type() const { return m_completion_type; }
     Optional<Value> const& completion_value() const { return m_completion_value; }
 
 private:
-    Operand m_iterator_record;
+    Operand m_iterator_object;
+    Operand m_iterator_next;
+    Operand m_iterator_done;
     Completion::Type m_completion_type { Completion::Type::Normal };
     Optional<Value> m_completion_value;
 };
 
 class IteratorNext final : public Instruction {
 public:
-    IteratorNext(Operand dst, Operand iterator_record)
+    IteratorNext(Operand dst, Operand iterator_object, Operand iterator_next, Operand iterator_done)
         : Instruction(Type::IteratorNext)
         , m_dst(dst)
-        , m_iterator_record(iterator_record)
+        , m_iterator_object(iterator_object)
+        , m_iterator_next(iterator_next)
+        , m_iterator_done(iterator_done)
     {
     }
 
@@ -2858,24 +2852,27 @@ public:
     void visit_operands_impl(Function<void(Operand&)> visitor)
     {
         visitor(m_dst);
-        visitor(m_iterator_record);
+        visitor(m_iterator_object);
+        visitor(m_iterator_next);
+        visitor(m_iterator_done);
     }
-
-    Operand dst() const { return m_dst; }
-    Operand iterator_record() const { return m_iterator_record; }
 
 private:
     Operand m_dst;
-    Operand m_iterator_record;
+    Operand m_iterator_object;
+    Operand m_iterator_next;
+    Operand m_iterator_done;
 };
 
 class IteratorNextUnpack final : public Instruction {
 public:
-    IteratorNextUnpack(Operand dst_value, Operand dst_done, Operand iterator_record)
+    IteratorNextUnpack(Operand dst_value, Operand dst_done, Operand iterator_object, Operand iterator_next, Operand iterator_done)
         : Instruction(Type::IteratorNextUnpack)
         , m_dst_value(dst_value)
         , m_dst_done(dst_done)
-        , m_iterator_record(iterator_record)
+        , m_iterator_object(iterator_object)
+        , m_iterator_next(iterator_next)
+        , m_iterator_done(iterator_done)
     {
     }
 
@@ -2885,17 +2882,17 @@ public:
     {
         visitor(m_dst_value);
         visitor(m_dst_done);
-        visitor(m_iterator_record);
+        visitor(m_iterator_object);
+        visitor(m_iterator_next);
+        visitor(m_iterator_done);
     }
-
-    Operand dst_value() const { return m_dst_value; }
-    Operand dst_done() const { return m_dst_done; }
-    Operand iterator_record() const { return m_iterator_record; }
 
 private:
     Operand m_dst_value;
     Operand m_dst_done;
-    Operand m_iterator_record;
+    Operand m_iterator_object;
+    Operand m_iterator_next;
+    Operand m_iterator_done;
 };
 
 class ResolveThisBinding final : public Instruction {
