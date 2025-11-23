@@ -273,6 +273,7 @@ set(SOURCES
     CSS/StyleValues/StyleValue.cpp
     CSS/StyleValues/StyleValueList.cpp
     CSS/StyleValues/SuperellipseStyleValue.cpp
+    CSS/StyleValues/TextIndentStyleValue.cpp
     CSS/StyleValues/TextUnderlinePositionStyleValue.cpp
     CSS/StyleValues/TransformationStyleValue.cpp
     CSS/StyleValues/TreeCountingFunctionStyleValue.cpp
@@ -900,6 +901,7 @@ set(SOURCES
     SVG/SVGAElement.cpp
     SVG/SVGAnimatedEnumeration.cpp
     SVG/SVGAnimatedLength.cpp
+    SVG/SVGAnimatedLengthList.cpp
     SVG/SVGAnimatedNumber.cpp
     SVG/SVGAnimatedNumberList.cpp
     SVG/SVGAnimatedRect.cpp
@@ -939,6 +941,7 @@ set(SOURCES
     SVG/SVGGraphicsElement.cpp
     SVG/SVGImageElement.cpp
     SVG/SVGLength.cpp
+    SVG/SVGLengthList.cpp
     SVG/SVGLinearGradientElement.cpp
     SVG/SVGLineElement.cpp
     SVG/SVGList.cpp
@@ -1013,6 +1016,7 @@ set(SOURCES
     WebAudio/DynamicsCompressorNode.cpp
     WebAudio/GainNode.cpp
     WebAudio/MediaElementAudioSourceNode.cpp
+    WebAudio/OfflineAudioCompletionEvent.cpp
     WebAudio/OfflineAudioContext.cpp
     WebAudio/OscillatorNode.cpp
     WebAudio/PannerNode.cpp

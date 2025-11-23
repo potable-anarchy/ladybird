@@ -32,6 +32,7 @@
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/CSS/StyleValues/SuperellipseStyleValue.h>
+#include <LibWeb/CSS/StyleValues/TextIndentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/CSS/Transformation.h>
@@ -971,6 +972,15 @@ static Optional<FloatMatrix4x4> interpolate_matrices(FloatMatrix4x4 const& from,
     return recompose(interpolated_decomposed);
 }
 
+static StyleValueVector matrix_to_style_value_vector(FloatMatrix4x4 const& matrix)
+{
+    StyleValueVector values;
+    values.ensure_capacity(16);
+    for (int i = 0; i < 16; i++)
+        values.unchecked_append(NumberStyleValue::create(matrix[i % 4, i / 4]));
+    return values;
+}
+
 // https://drafts.csswg.org/css-transforms-1/#interpolation-of-transforms
 RefPtr<StyleValue const> interpolate_transform(DOM::Element& element, CalculationContext const& calculation_context,
     StyleValue const& from, StyleValue const& to, float delta, AllowDiscrete)
@@ -1153,7 +1163,8 @@ RefPtr<StyleValue const> interpolate_transform(DOM::Element& element, Calculatio
             parameters.append(transform->values()[0]);
             break;
         default:
-            VERIFY_NOT_REACHED();
+            generic_function = TransformFunction::Matrix3d;
+            parameters = matrix_to_style_value_vector(MUST(transform->to_transformation().to_matrix({})));
         }
         return TransformationStyleValue::create(PropertyID::Transform, generic_function, move(parameters));
     };
@@ -1272,12 +1283,8 @@ RefPtr<StyleValue const> interpolate_transform(DOM::Element& element, Calculatio
 
     auto maybe_interpolated_matrix = interpolate_matrices(from_matrix, to_matrix, delta);
     if (maybe_interpolated_matrix.has_value()) {
-        auto interpolated_matrix = maybe_interpolated_matrix.release_value();
-        StyleValueVector values;
-        values.ensure_capacity(16);
-        for (int i = 0; i < 16; i++)
-            values.unchecked_append(NumberStyleValue::create(interpolated_matrix[i % 4, i / 4]));
-        result.append(TransformationStyleValue::create(PropertyID::Transform, TransformFunction::Matrix3d, move(values)));
+        result.append(TransformationStyleValue::create(PropertyID::Transform, TransformFunction::Matrix3d,
+            matrix_to_style_value_vector(maybe_interpolated_matrix.release_value())));
     } else {
         dbgln("Unable to interpolate matrices.");
     }
@@ -1870,6 +1877,22 @@ static RefPtr<StyleValue const> interpolate_value_impl(DOM::Element& element, Ca
             interpolate_length_or_auto(from_rect.bottom_edge, to_rect.bottom_edge, calculation_context, delta),
             interpolate_length_or_auto(from_rect.left_edge, to_rect.left_edge, calculation_context, delta),
         });
+    }
+    case StyleValue::Type::TextIndent: {
+        auto& from_text_indent = from.as_text_indent();
+        auto& to_text_indent = to.as_text_indent();
+
+        if (from_text_indent.each_line() != to_text_indent.each_line()
+            || from_text_indent.hanging() != to_text_indent.hanging())
+            return {};
+
+        auto interpolated_length_percentage = interpolate_value(element, calculation_context, from_text_indent.length_percentage(), to_text_indent.length_percentage(), delta, allow_discrete);
+        if (!interpolated_length_percentage)
+            return {};
+
+        return TextIndentStyleValue::create(interpolated_length_percentage.release_nonnull(),
+            from_text_indent.hanging() ? TextIndentStyleValue::Hanging::Yes : TextIndentStyleValue::Hanging::No,
+            from_text_indent.each_line() ? TextIndentStyleValue::EachLine::Yes : TextIndentStyleValue::EachLine::No);
     }
     case StyleValue::Type::Superellipse: {
         // https://drafts.csswg.org/css-borders-4/#corner-shape-interpolation
